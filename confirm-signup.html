@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>회원가입 완료</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f9f9f9; }
+        .container { max-width: 400px; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        h2 { color: #3ecf8e; }
+        .btn { display: inline-block; margin-top: 20px; padding: 10px 20px; background-color: #3ecf8e; color: white; text-decoration: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="status-icon">⏳</div>
+        <h2 id="title">이메일 인증 확인 중</h2>
+        <p id="message">잠시만 기다려주세요. 계정을 활성화하고 있습니다.</p>
+        <a href="/" id="login-btn" class="btn" style="display: none;">로그인하러 가기</a>
+    </div>
+
+    <script>
+        // 본인의 Supabase 정보로 교체하세요
+        const SUPABASE_URL = 'https://your-project.supabase.co';
+        const SUPABASE_KEY = 'your-anon-key';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        async function verifyEmail() {
+            const titleTag = document.getElementById('title');
+            const messageTag = document.getElementById('message');
+            const iconTag = document.getElementById('status-icon');
+            const loginBtn = document.getElementById('login-btn');
+
+            // 사용자가 메일 링크를 통해 들어오면 Supabase가 자동으로 세션을 확인합니다.
+            const { data, error } = await supabaseClient.auth.getSession();
+
+            if (error) {
+                iconTag.innerText = "❌";
+                titleTag.innerText = "인증 실패";
+                messageTag.innerText = "링크가 만료되었거나 올바르지 않습니다: " + error.message;
+            } else if (data.session) {
+                iconTag.innerText = "✅";
+                titleTag.innerText = "인증 성공!";
+                messageTag.innerText = "이메일 인증이 완료되었습니다. 이제 서비스를 이용하실 수 있습니다.";
+                loginBtn.style.display = "inline-block";
+            } else {
+                iconTag.innerText = "❓";
+                titleTag.innerText = "인증 정보 없음";
+                messageTag.innerText = "인증 세션을 찾을 수 없습니다. 다시 시도해주세요.";
+            }
+        }
+
+        // 페이지 로드 시 즉시 실행
+        verifyEmail();
+    </script>
+</body>
+</html>
