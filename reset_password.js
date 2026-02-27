@@ -1,44 +1,44 @@
 import { useState } from 'react'
-import { supabase } from '../utils/supabaseClient' // 본인의 supabase 설정 파일
+import { supabase } from '../utils/supabase' // Supabase 클라이언트 설정 파일
 
 export default function UpdatePassword() {
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [message, setMessage] = useState('')
 
-  const handleUpdate = async (e) => {
+  const handlePasswordUpdate = async (e) => {
     e.preventDefault()
-    setLoading(true)
-
-    // 핵심: 사용자가 메일 링크를 타고 들어오면 이미 인증 세션이 활성화된 상태입니다.
-    // 여기서 비밀번호만 업데이트하면 됩니다.
+    
+    // 사용자가 메일을 통해 들어오면 Supabase가 자동으로 세션을 복구합니다.
+    // 그 상태에서 아래 함수를 호출하면 비밀번호가 변경됩니다.
     const { error } = await supabase.auth.updateUser({
-      password: password
+      password: newPassword
     })
 
     if (error) {
-      alert("오류가 발생했습니다: " + error.message)
+      setMessage(`오류: ${error.message}`)
     } else {
-      alert("비밀번호가 성공적으로 변경되었습니다! 로그인을 진행하세요.")
-      window.location.href = '/login' // 변경 후 로그인 페이지로 이동
+      setMessage("비밀번호가 성공적으로 변경되었습니다. 이제 로그인이 가능합니다.")
+      // 성공 후 로그인 페이지 등으로 이동 처리
     }
-    setLoading(false)
   }
 
   return (
-    <div style={{ padding: '20px' }}>
+    <div style={{ maxWidth: '400px', margin: '50px auto' }}>
       <h1>새 비밀번호 설정</h1>
-      <form onSubmit={handleUpdate}>
+      <form onSubmit={handlePasswordUpdate}>
         <input 
           type="password" 
           placeholder="새로운 비밀번호 입력" 
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
           required 
+          style={{ width: '100%', padding: '10px', marginBottom: '10px' }}
         />
-        <button type="submit" disabled={loading}>
-          {loading ? '변경 중...' : '비밀번호 저장'}
+        <button type="submit" style={{ width: '100%', padding: '10px' }}>
+          비밀번호 저장하기
         </button>
       </form>
+      {message && <p>{message}</p>}
     </div>
   )
 }
