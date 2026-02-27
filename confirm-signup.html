@@ -29,7 +29,6 @@
             const titleTag = document.getElementById('title');
             const messageTag = document.getElementById('message');
             const iconTag = document.getElementById('status-icon');
-            const loginBtn = document.getElementById('login-btn');
 
             // 사용자가 메일 링크를 통해 들어오면 Supabase가 자동으로 세션을 확인합니다.
             const { data, error } = await supabaseClient.auth.getSession();
@@ -42,7 +41,6 @@
                 iconTag.innerText = "✅";
                 titleTag.innerText = "인증 성공!";
                 messageTag.innerText = "이메일 인증이 완료되었습니다. 이제 서비스를 이용하실 수 있습니다.";
-                loginBtn.style.display = "inline-block";
             } else {
                 iconTag.innerText = "❓";
                 titleTag.innerText = "인증 정보 없음";
