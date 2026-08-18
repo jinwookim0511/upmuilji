@@ -39,3 +39,13 @@ test("uses the Vercel-compatible Next.js and Node mail runtimes", async () => {
   assert.match(mailRoute, /new URL\(request\.url\)\.origin/);
   assert.doesNotMatch(mailRoute, /cloudflare:sockets|chatgpt\.site/);
 });
+
+test("lets employees choose a range for past-week bulk submission", async () => {
+  const workLogApp = await readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8");
+
+  assert.match(workLogApp, /function BulkSubmitRangeDialog/);
+  assert.match(workLogApp, /상신할 기간을 선택하세요/);
+  assert.match(workLogApp, /pastWeeks\s*\.slice\(startIndex, endIndex \+ 1\)/);
+  assert.match(workLogApp, /isBulkSubmittable\(statusMap\[week\] \?\? "작성중"\)/);
+  assert.match(workLogApp, /disabled=\{!targets\.length\}/);
+});
