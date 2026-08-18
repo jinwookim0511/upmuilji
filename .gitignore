@@ -40,8 +40,6 @@ yarn-error.log*
 /outputs/
 /work/
 /public/og.png
-/app/api/approval-email/NanumGothicCoding-Regular.ttf
-/app/api/approval-email/OFL.txt
 
 # typescript
 *.tsbuildinfo

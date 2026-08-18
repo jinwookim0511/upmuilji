@@ -1,7 +1,7 @@
 import fontkit from "@pdf-lib/fontkit";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
+
+declare const PDF_FONT_BASE64: string;
 
 type Task = {
   날짜?: string;
@@ -54,13 +54,8 @@ const PALE = rgb(0.95, 0.96, 0.97);
 const ACCENT = rgb(0.08, 0.39, 0.32);
 
 function fontBytes() {
-  return readFile(path.join(
-    process.cwd(),
-    "app",
-    "api",
-    "approval-email",
-    "NanumGothicCoding-Regular.ttf",
-  ));
+  if (!PDF_FONT_BASE64) throw new Error("PDF 글꼴 번들이 비어 있습니다.");
+  return Buffer.from(PDF_FONT_BASE64, "base64");
 }
 
 function mondayOfWeek(week: string) {
@@ -175,7 +170,7 @@ export async function createWorkLogPdf(record: WorkLogRecord, employeeName: stri
   document.registerFontkit(fontkit);
   // pdf-lib's font subsetting is not reliable for every font, especially CJK
   // fonts. Embed the original TTF in full so Acrobat can extract and render it.
-  const font = await document.embedFont(await fontBytes(), { subset: false });
+  const font = await document.embedFont(fontBytes(), { subset: false });
   const context: PdfContext = { document, page: document.addPage(A4), font, y: A4[1] - MARGIN };
   const monday = mondayOfWeek(record.week);
   const friday = new Date(monday);
