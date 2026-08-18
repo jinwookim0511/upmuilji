@@ -56,11 +56,10 @@ const ACCENT = rgb(0.08, 0.39, 0.32);
 function fontBytes() {
   return readFile(path.join(
     process.cwd(),
-    "node_modules",
-    "@fontsource",
-    "nanum-gothic-coding",
-    "files",
-    "nanum-gothic-coding-korean-400-normal.woff",
+    "app",
+    "api",
+    "approval-email",
+    "NanumGothicCoding-Regular.ttf",
   ));
 }
 
@@ -174,7 +173,9 @@ function drawApproval(context: PdfContext, status: string) {
 export async function createWorkLogPdf(record: WorkLogRecord, employeeName: string, employeeEmail: string) {
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
-  const font = await document.embedFont(await fontBytes(), { subset: true });
+  // pdf-lib's font subsetting is not reliable for every font, especially CJK
+  // fonts. Embed the original TTF in full so Acrobat can extract and render it.
+  const font = await document.embedFont(await fontBytes(), { subset: false });
   const context: PdfContext = { document, page: document.addPage(A4), font, y: A4[1] - MARGIN };
   const monday = mondayOfWeek(record.week);
   const friday = new Date(monday);
