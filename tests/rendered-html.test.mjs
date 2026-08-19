@@ -64,6 +64,31 @@ test("saves an employee's draft before signing out", async () => {
   assert.match(workLogApp, /className="logout" onClick=\{logout\} disabled=\{saving\}/);
 });
 
+test("autosaves employee drafts across interactions and browser exit", async () => {
+  const [workLogApp, migration] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260819075850_protect_admin_work_log_content.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workLogApp, /const AUTO_SAVE_DEBOUNCE_MS = 800/);
+  assert.match(workLogApp, /keepalive: true/);
+  assert.match(workLogApp, /window\.addEventListener\("beforeunload", persistDraftOnExit\)/);
+  assert.match(workLogApp, /window\.addEventListener\("pagehide", persistDraftOnExit\)/);
+  assert.match(workLogApp, /document\.addEventListener\("visibilitychange", saveWhenHidden\)/);
+  assert.match(workLogApp, /document\.addEventListener\("click", saveAfterInteraction\)/);
+  assert.match(workLogApp, /document\.addEventListener\("change", saveAfterInteraction\)/);
+  assert.match(workLogApp, /async function selectView\(nextView: View\)[\s\S]*await saveBeforeAction/);
+  assert.match(workLogApp, /async function selectFilter\(nextFilter: string\)[\s\S]*await saveBeforeAction/);
+  assert.match(workLogApp, /if \(profile\?\.role !== "직원" \|\| !canEdit\) return;/);
+
+  assert.match(migration, /create trigger enforce_admin_work_log_status_only/);
+  assert.match(migration, /create policy work_logs_insert_authenticated/);
+  assert.match(migration, /user_roles\.role = '직원'/);
+  assert.match(migration, /new\.data is distinct from old\.data/);
+  assert.match(migration, /role = '관리자'/);
+  assert.match(migration, /errcode = '42501'/);
+});
+
 test("generates Korean PDFs with a subsetted Nanum Gothic font", async () => {
   const [packageJson, nextConfig, pdfGenerator] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),

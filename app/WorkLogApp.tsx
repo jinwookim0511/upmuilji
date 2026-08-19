@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "./lib/supabase";
 import { createZip, type ZipEntry } from "./lib/zip";
@@ -65,9 +65,20 @@ type BulkApprovalProgress = {
   currentWeek: string;
 };
 
+type DraftSnapshot = {
+  accessToken: string;
+  userId: string;
+  email: string;
+  week: string;
+  status: string;
+  data: WeekData;
+  version: number;
+};
+
 const DAYS = ["월", "화", "수", "목", "금"];
 const LEAVE_TYPES = ["-", "연차", "반차", "반반차", "그외법정휴가", "경조사", "병가", "공휴일"];
-const AUTO_SAVE_INTERVAL_MS = 30 * 60 * 1000;
+const AUTO_SAVE_DEBOUNCE_MS = 800;
+const AUTO_SAVE_INTERVAL_MS = 30 * 1000;
 const KOREAN_COLLATOR = new Intl.Collator("ko-KR", { sensitivity: "base" });
 
 function employeeSelectionStorageKey(adminId: string) {
@@ -266,6 +277,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   const [bulkProgress, setBulkProgress] = useState<BulkApprovalProgress | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const draftVersionRef = useRef(0);
+  const draftSnapshotRef = useRef<DraftSnapshot | null>(null);
+  const loadLogRequestRef = useRef(0);
   const bulkApprovingRef = useRef(false);
   const saveCurrentRef = useRef<(showMessage?: boolean) => Promise<boolean>>(async () => false);
   const selectWeekRef = useRef<(week: string) => Promise<void>>(async () => undefined);
@@ -307,6 +322,20 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   }, [filter, statusMap, weeks]);
 
   const canEdit = profile?.role === "직원" && ["작성중", "반려"].includes(status);
+
+  useLayoutEffect(() => {
+    draftSnapshotRef.current = session?.access_token && currentUser && profile?.role === "직원" && canEdit
+      ? {
+          accessToken: session.access_token,
+          userId: currentUser.id,
+          email: currentUser.email,
+          week: selectedWeek,
+          status,
+          data: weekData,
+          version: draftVersionRef.current,
+        }
+      : null;
+  }, [canEdit, currentUser, profile?.role, selectedWeek, session?.access_token, status, weekData]);
 
   useEffect(() => {
     if (!bulkProgress?.active && !pdfExporting) return;
@@ -404,13 +433,17 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
   const loadLog = useCallback(async (week: string, email: string) => {
     if (!session?.user || !email) return;
+    const requestId = loadLogRequestRef.current + 1;
+    loadLogRequestRef.current = requestId;
     setBusy(true);
     let query = supabase.from("work_logs").select("id, user_id, email, week, status, data").eq("week", week);
     query = profile?.role === "관리자" ? query.eq("email", email) : query.eq("user_id", session.user.id);
     const { data, error } = await query.limit(1).maybeSingle();
+    if (requestId !== loadLogRequestRef.current) return;
     if (error) flash(`업무일지를 불러오지 못했습니다: ${error.message}`);
     setStatus(data?.status ?? "작성중");
     setWeekData(normalizeData(week, data?.data));
+    draftVersionRef.current += 1;
     dirtyRef.current = false;
     setDirty(false);
     setBusy(false);
@@ -433,44 +466,107 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
   useEffect(() => {
     if (!selectedEmail) return;
-    // These loaders synchronize the view with the newly selected user/week.
+    // These loaders synchronize the journal with the newly selected user/week.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadStatusMap(selectedEmail);
     loadLeaveTotal(selectedEmail);
     loadLog(selectedWeek, selectedEmail);
-    if (view !== "journal") loadHistory(selectedEmail);
-  }, [loadHistory, loadLeaveTotal, loadLog, loadStatusMap, selectedEmail, selectedWeek, view]);
+  }, [loadLeaveTotal, loadLog, loadStatusMap, selectedEmail, selectedWeek]);
+
+  useEffect(() => {
+    if (!selectedEmail || view === "journal") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadHistory(selectedEmail);
+  }, [loadHistory, selectedEmail, view]);
 
   function markChanged(updater: (value: WeekData) => WeekData) {
+    if (profile?.role !== "직원" || !canEdit) return;
     setWeekData((current) => updater(current));
+    draftVersionRef.current += 1;
     dirtyRef.current = true;
     setDirty(true);
   }
 
   async function saveCurrent(showMessage = true) {
-    if (!session?.user || !currentUser || profile?.role !== "직원" || !canEdit || savingRef.current) return false;
+    const snapshot = draftSnapshotRef.current;
+    if (!snapshot || profile?.role !== "직원") return false;
+    if (!dirtyRef.current) return true;
+    if (savePromiseRef.current) {
+      const saved = await savePromiseRef.current;
+      if (!saved || !dirtyRef.current) return saved;
+      return saveCurrentRef.current(showMessage);
+    }
+
     savingRef.current = true;
     setSaving(true);
+    const version = snapshot.version;
     const payload = {
-      user_id: currentUser.id,
-      email: currentUser.email,
-      week: selectedWeek,
-      status,
-      data: weekData,
+      user_id: snapshot.userId,
+      email: snapshot.email,
+      week: snapshot.week,
+      status: snapshot.status,
+      data: snapshot.data,
     };
-    const { error } = await supabase.from("work_logs").upsert(payload, { onConflict: "user_id,week" });
+    const savePromise = (async () => {
+      const { error } = await supabase.from("work_logs").upsert(payload, { onConflict: "user_id,week" });
+      if (error) {
+        flash(`저장하지 못했습니다: ${error.message}`);
+        return false;
+      }
+      setStatusMap((current) => ({ ...current, [payload.week]: payload.status }));
+      if (draftVersionRef.current === version && draftSnapshotRef.current?.week === payload.week) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
+      if (showMessage) flash("업무일지를 저장했습니다.");
+      return true;
+    })();
+    savePromiseRef.current = savePromise;
+    const saved = await savePromise;
+    if (savePromiseRef.current === savePromise) savePromiseRef.current = null;
     savingRef.current = false;
     setSaving(false);
-    if (error) {
-      flash(`저장하지 못했습니다: ${error.message}`);
-      return false;
+    return saved;
+  }
+
+  async function saveBeforeAction(action: () => void | Promise<void>) {
+    while (profile?.role === "직원" && dirtyRef.current) {
+      const saved = await saveCurrentRef.current(false);
+      if (!saved) return false;
     }
-    setStatusMap((current) => ({ ...current, [selectedWeek]: status }));
-    dirtyRef.current = false;
-    setDirty(false);
-    if (showMessage) flash("업무일지를 저장했습니다.");
+    await action();
     return true;
   }
+
+  const persistDraftOnExit = useCallback(() => {
+    const snapshot = draftSnapshotRef.current;
+    if (!snapshot || !dirtyRef.current) return;
+    const endpoint = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/work_logs?on_conflict=user_id%2Cweek`;
+    void fetch(endpoint, {
+      method: "POST",
+      keepalive: true,
+      headers: {
+        apikey: supabasePublishableKey,
+        Authorization: `Bearer ${snapshot.accessToken}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        user_id: snapshot.userId,
+        email: snapshot.email,
+        week: snapshot.week,
+        status: snapshot.status,
+        data: snapshot.data,
+      }),
+    }).then((response) => {
+      if (response.ok && draftVersionRef.current === snapshot.version && draftSnapshotRef.current?.week === snapshot.week) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
+    }).catch(() => {
+      // The normal debounced save remains the fallback if the browser cancels an exit request.
+    });
+  }, [supabasePublishableKey, supabaseUrl]);
 
   async function logout() {
     if (profile?.role === "직원" && dirtyRef.current) {
@@ -482,10 +578,12 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     if (error) flash(`로그아웃하지 못했습니다: ${error.message}`);
   }
 
-  function openPdfDialog() {
-    setPdfStartWeek(selectedWeek);
-    setPdfEndWeek(selectedWeek);
-    setPdfDialogOpen(true);
+  async function openPdfDialog() {
+    await saveBeforeAction(() => {
+      setPdfStartWeek(selectedWeek);
+      setPdfEndWeek(selectedWeek);
+      setPdfDialogOpen(true);
+    });
   }
 
   async function downloadPdfRange() {
@@ -561,9 +659,18 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     }
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     saveCurrentRef.current = saveCurrent;
   });
+
+  useEffect(() => {
+    if (profile?.role !== "직원" || !canEdit) return;
+    if (!dirty) return;
+    const timer = window.setTimeout(() => {
+      void saveCurrentRef.current(false);
+    }, AUTO_SAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [canEdit, dirty, profile?.role, selectedWeek, status, weekData]);
 
   useEffect(() => {
     if (profile?.role !== "직원" || !canEdit) return;
@@ -574,6 +681,38 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     }, AUTO_SAVE_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [canEdit, flash, profile?.role, selectedWeek]);
+
+  useEffect(() => {
+    if (profile?.role !== "직원" || !canEdit) return;
+    function saveWhenHidden() {
+      if (document.visibilityState === "hidden") persistDraftOnExit();
+    }
+    window.addEventListener("beforeunload", persistDraftOnExit);
+    window.addEventListener("pagehide", persistDraftOnExit);
+    document.addEventListener("visibilitychange", saveWhenHidden);
+    return () => {
+      window.removeEventListener("beforeunload", persistDraftOnExit);
+      window.removeEventListener("pagehide", persistDraftOnExit);
+      document.removeEventListener("visibilitychange", saveWhenHidden);
+    };
+  }, [canEdit, persistDraftOnExit, profile?.role]);
+
+  useEffect(() => {
+    if (profile?.role !== "직원") return;
+    function saveAfterInteraction(event: Event) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest("button, select, a, [role='button'], [role='menuitem']")) return;
+      window.setTimeout(() => {
+        if (dirtyRef.current) void saveCurrentRef.current(false);
+      }, 0);
+    }
+    document.addEventListener("click", saveAfterInteraction);
+    document.addEventListener("change", saveAfterInteraction);
+    return () => {
+      document.removeEventListener("click", saveAfterInteraction);
+      document.removeEventListener("change", saveAfterInteraction);
+    };
+  }, [profile?.role]);
 
   async function updateCurrentStatus(nextStatus: string) {
     if (profile?.role !== "관리자" || !currentUser) return false;
@@ -605,11 +744,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
   async function selectWeek(week: string) {
     if (week === selectedWeek || savingRef.current) return;
-    if (dirtyRef.current && canEdit) {
-      const saved = await saveCurrent(false);
-      if (!saved) return;
-    }
-    setSelectedWeek(week);
+    await saveBeforeAction(() => setSelectedWeek(week));
   }
 
   useEffect(() => {
@@ -636,9 +771,22 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   }, [filteredWeeks, selectedWeek, view]);
 
   async function selectUser(email: string) {
-    if (dirty && canEdit) await saveCurrent(false);
+    if (dirty && canEdit && !(await saveCurrent(false))) return;
     if (profile?.role === "관리자") saveEmployeeSelection(profile.id, email);
     setSelectedEmail(email);
+  }
+
+  async function selectView(nextView: View) {
+    if (nextView === view) return;
+    await saveBeforeAction(async () => {
+      setView(nextView);
+      if (nextView !== "journal") await loadHistory(selectedEmail);
+    });
+  }
+
+  async function selectFilter(nextFilter: string) {
+    if (nextFilter === filter) return;
+    await saveBeforeAction(() => setFilter(nextFilter));
   }
 
   function fillDefaultTimes() {
@@ -712,7 +860,8 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     await updateCurrentStatus("반려");
   }
 
-  function openBulkSubmitDialog() {
+  async function openBulkSubmitDialog() {
+    if (profile?.role === "직원" && dirtyRef.current && !(await saveCurrentRef.current(false))) return;
     const eligibleWeeks = pastWeeks.filter((week) => isBulkSubmittable(statusMap[week] ?? "작성중"));
     if (!eligibleWeeks.length) {
       flash("상신할 과거 주차가 없습니다.");
@@ -871,9 +1020,9 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
         )}
 
         <nav className="side-nav" aria-label="주요 화면">
-          <button className={view === "journal" ? "active" : ""} onClick={() => setView("journal")}><span>▤</span> 주간 업무일지</button>
-          <button className={view === "leave" ? "active" : ""} onClick={() => { setView("leave"); loadHistory(selectedEmail); }}><span>◷</span> 휴가 사용 내역</button>
-          <button className={view === "special" ? "active" : ""} onClick={() => { setView("special"); loadHistory(selectedEmail); }}><span>⌁</span> 특근 모아보기</button>
+          <button className={view === "journal" ? "active" : ""} onClick={() => selectView("journal")}><span>▤</span> 주간 업무일지</button>
+          <button className={view === "leave" ? "active" : ""} onClick={() => selectView("leave")}><span>◷</span> 휴가 사용 내역</button>
+          <button className={view === "special" ? "active" : ""} onClick={() => selectView("special")}><span>⌁</span> 특근 모아보기</button>
         </nav>
         <p className="week-shortcut-hint"><span>주차 이동</span><kbd>Shift</kbd><b>+</b><kbd>←</kbd><b>/</b><kbd>→</kbd></p>
 
@@ -921,7 +1070,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
                 </select>
               </label>
               <label>보기
-                <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+                <select value={filter} onChange={(event) => selectFilter(event.target.value)}>
                   <option>전체</option><option>부센터장 서명 전</option><option>센터장 서명 전</option><option>서명 완료</option><option>작성중</option>
                 </select>
               </label>
