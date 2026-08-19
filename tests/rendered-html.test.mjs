@@ -49,3 +49,17 @@ test("lets employees choose a range for past-week bulk submission", async () => 
   assert.match(workLogApp, /isBulkSubmittable\(statusMap\[week\] \?\? "작성중"\)/);
   assert.match(workLogApp, /disabled=\{!targets\.length\}/);
 });
+
+test("saves an employee's draft before signing out", async () => {
+  const workLogApp = await readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8");
+  const logoutStart = workLogApp.indexOf("async function logout()");
+  const logoutEnd = workLogApp.indexOf("function openPdfDialog()", logoutStart);
+  const logout = workLogApp.slice(logoutStart, logoutEnd);
+
+  assert.notEqual(logoutStart, -1);
+  assert.notEqual(logoutEnd, -1);
+  assert.match(logout, /profile\?\.role === "직원" && dirtyRef\.current/);
+  assert.match(logout, /const saved = await saveCurrent\(false\)/);
+  assert.ok(logout.indexOf("await saveCurrent(false)") < logout.indexOf("await supabase.auth.signOut()"));
+  assert.match(workLogApp, /className="logout" onClick=\{logout\} disabled=\{saving\}/);
+});

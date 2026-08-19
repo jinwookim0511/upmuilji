@@ -472,6 +472,16 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     return true;
   }
 
+  async function logout() {
+    if (profile?.role === "직원" && dirtyRef.current) {
+      const saved = await saveCurrent(false);
+      if (!saved) return;
+    }
+
+    const { error } = await supabase.auth.signOut();
+    if (error) flash(`로그아웃하지 못했습니다: ${error.message}`);
+  }
+
   function openPdfDialog() {
     setPdfStartWeek(selectedWeek);
     setPdfEndWeek(selectedWeek);
@@ -892,7 +902,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
           </div>
         )}
 
-        <button className="logout" onClick={() => supabase.auth.signOut()}>로그아웃</button>
+        <button className="logout" onClick={logout} disabled={saving}>로그아웃</button>
       </aside>
 
       <main className="main-area">
