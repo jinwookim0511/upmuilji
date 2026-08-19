@@ -101,6 +101,27 @@ function saveEmployeeSelection(adminId: string, email: string) {
   }
 }
 
+function weekSelectionStorageKey(userId: string) {
+  return `upmuilji:last-selected-week:${userId}`;
+}
+
+function savedWeekSelection(userId: string, weeks: string[]) {
+  try {
+    const savedWeek = window.localStorage.getItem(weekSelectionStorageKey(userId));
+    return savedWeek && weeks.includes(savedWeek) ? savedWeek : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveWeekSelection(userId: string, week: string) {
+  try {
+    window.localStorage.setItem(weekSelectionStorageKey(userId), week);
+  } catch {
+    // The selection is a browser convenience only, so storage failures should not block navigation.
+  }
+}
+
 function employeeSortName(user: RoleRow) {
   return (user.name ?? user.email).trim();
 }
@@ -275,6 +296,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   const [dirty, setDirty] = useState(false);
   const [notice, setNotice] = useState("");
   const [bulkProgress, setBulkProgress] = useState<BulkApprovalProgress | null>(null);
+  const weekDataRef = useRef(weekData);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
@@ -324,6 +346,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   const canEdit = profile?.role === "직원" && ["작성중", "반려"].includes(status);
 
   useLayoutEffect(() => {
+    weekDataRef.current = weekData;
     draftSnapshotRef.current = session?.access_token && currentUser && profile?.role === "직원" && canEdit
       ? {
           accessToken: session.access_token,
@@ -396,6 +419,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
         role: "직원",
       };
       setProfile(nextProfile);
+      setSelectedWeek(savedWeekSelection(nextProfile.id, weeks) ?? closestWeekToToday(weeks));
 
       if (nextProfile.role === "관리자") {
         const { data: staff } = await supabase.from("user_roles").select("id, role, name, email");
@@ -411,7 +435,6 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
       } else {
         setUsers([nextProfile]);
         setSelectedEmail(nextProfile.email);
-        setSelectedWeek(closestWeekToToday(weeks));
       }
       setBusy(false);
     }
@@ -420,6 +443,11 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
       active = false;
     };
   }, [flash, session, supabase, weeks]);
+
+  useEffect(() => {
+    if (!profile || !weeks.includes(selectedWeek)) return;
+    saveWeekSelection(profile.id, selectedWeek);
+  }, [profile, selectedWeek, weeks]);
 
   const loadStatusMap = useCallback(async (email: string) => {
     if (!email) return;
@@ -441,8 +469,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     const { data, error } = await query.limit(1).maybeSingle();
     if (requestId !== loadLogRequestRef.current) return;
     if (error) flash(`업무일지를 불러오지 못했습니다: ${error.message}`);
+    const nextWeekData = normalizeData(week, data?.data);
     setStatus(data?.status ?? "작성중");
-    setWeekData(normalizeData(week, data?.data));
+    weekDataRef.current = nextWeekData;
+    setWeekData(nextWeekData);
     draftVersionRef.current += 1;
     dirtyRef.current = false;
     setDirty(false);
@@ -481,8 +511,17 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
   function markChanged(updater: (value: WeekData) => WeekData) {
     if (profile?.role !== "직원" || !canEdit) return;
-    setWeekData((current) => updater(current));
+    const nextWeekData = updater(weekDataRef.current);
     draftVersionRef.current += 1;
+    weekDataRef.current = nextWeekData;
+    if (draftSnapshotRef.current) {
+      draftSnapshotRef.current = {
+        ...draftSnapshotRef.current,
+        data: nextWeekData,
+        version: draftVersionRef.current,
+      };
+    }
+    setWeekData(nextWeekData);
     dirtyRef.current = true;
     setDirty(true);
   }
@@ -499,13 +538,13 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
     savingRef.current = true;
     setSaving(true);
-    const version = snapshot.version;
+    const version = draftVersionRef.current;
     const payload = {
       user_id: snapshot.userId,
       email: snapshot.email,
       week: snapshot.week,
       status: snapshot.status,
-      data: snapshot.data,
+      data: weekDataRef.current,
     };
     const savePromise = (async () => {
       const { error } = await supabase.from("work_logs").upsert(payload, { onConflict: "user_id,week" });
