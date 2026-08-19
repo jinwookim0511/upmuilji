@@ -64,6 +64,15 @@ test("saves an employee's draft before signing out", async () => {
   assert.match(workLogApp, /className="logout" onClick=\{logout\} disabled=\{saving\}/);
 });
 
+test("restores the last selected week after a reload", async () => {
+  const workLogApp = await readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8");
+
+  assert.match(workLogApp, /upmuilji:last-selected-week:\$\{userId\}/);
+  assert.match(workLogApp, /savedWeek && weeks\.includes\(savedWeek\) \? savedWeek : null/);
+  assert.match(workLogApp, /setSelectedWeek\(savedWeekSelection\(nextProfile\.id, weeks\) \?\? closestWeekToToday\(weeks\)\)/);
+  assert.match(workLogApp, /saveWeekSelection\(profile\.id, selectedWeek\)/);
+});
+
 test("autosaves employee drafts across interactions and browser exit", async () => {
   const [workLogApp, migration] = await Promise.all([
     readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
@@ -80,6 +89,9 @@ test("autosaves employee drafts across interactions and browser exit", async () 
   assert.match(workLogApp, /async function selectView\(nextView: View\)[\s\S]*await saveBeforeAction/);
   assert.match(workLogApp, /async function selectFilter\(nextFilter: string\)[\s\S]*await saveBeforeAction/);
   assert.match(workLogApp, /if \(profile\?\.role !== "직원" \|\| !canEdit\) return;/);
+  assert.match(workLogApp, /const nextWeekData = updater\(weekDataRef\.current\)/);
+  assert.match(workLogApp, /draftSnapshotRef\.current = \{[\s\S]*data: nextWeekData,[\s\S]*version: draftVersionRef\.current/);
+  assert.match(workLogApp, /const version = draftVersionRef\.current;[\s\S]*data: weekDataRef\.current/);
 
   assert.match(migration, /create trigger enforce_admin_work_log_status_only/);
   assert.match(migration, /create policy work_logs_insert_authenticated/);
