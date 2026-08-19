@@ -107,6 +107,17 @@ function mondayOfWeek(week: string) {
   return new Date(year, month - 1, 1 + daysUntilMonday + (weekNumber - 1) * 7);
 }
 
+function currentWeekMonday() {
+  const monday = new Date();
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  return monday;
+}
+
+function isBulkSubmittable(status: string) {
+  return ["작성중", "반려"].includes(status);
+}
+
 function isoDate(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -245,6 +256,9 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const [pdfStartWeek, setPdfStartWeek] = useState(weeks[0]);
   const [pdfEndWeek, setPdfEndWeek] = useState(weeks[0]);
+  const [bulkSubmitDialogOpen, setBulkSubmitDialogOpen] = useState(false);
+  const [bulkSubmitStartWeek, setBulkSubmitStartWeek] = useState(weeks[0]);
+  const [bulkSubmitEndWeek, setBulkSubmitEndWeek] = useState(weeks[0]);
   const [pdfCompleted, setPdfCompleted] = useState(0);
   const [pdfTotal, setPdfTotal] = useState(0);
   const [dirty, setDirty] = useState(false);
@@ -275,6 +289,11 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     value.setDate(value.getDate() + 4);
     return value;
   }, [selectedMonday]);
+
+  const pastWeeks = useMemo(() => {
+    const monday = currentWeekMonday();
+    return weeks.filter((week) => mondayOfWeek(week) < monday);
+  }, [weeks]);
 
   const filteredWeeks = useMemo(() => {
     return weeks.filter((week) => {
@@ -451,6 +470,16 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     setDirty(false);
     if (showMessage) flash("업무일지를 저장했습니다.");
     return true;
+  }
+
+  async function logout() {
+    if (profile?.role === "직원" && dirtyRef.current) {
+      const saved = await saveCurrent(false);
+      if (!saved) return;
+    }
+
+    const { error } = await supabase.auth.signOut();
+    if (error) flash(`로그아웃하지 못했습니다: ${error.message}`);
   }
 
   function openPdfDialog() {
@@ -683,31 +712,55 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     await updateCurrentStatus("반려");
   }
 
+  function openBulkSubmitDialog() {
+    const eligibleWeeks = pastWeeks.filter((week) => isBulkSubmittable(statusMap[week] ?? "작성중"));
+    if (!eligibleWeeks.length) {
+      flash("상신할 과거 주차가 없습니다.");
+      return;
+    }
+    setBulkSubmitStartWeek(eligibleWeeks[0]);
+    setBulkSubmitEndWeek(eligibleWeeks[eligibleWeeks.length - 1]);
+    setBulkSubmitDialogOpen(true);
+  }
+
   async function bulkSubmit() {
     if (!session?.user || profile?.role !== "직원" || savingRef.current) return;
-    const monday = new Date();
-    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-    const targets = weeks.filter((week) => {
-      const state = statusMap[week] ?? "작성중";
-      return mondayOfWeek(week) < monday && ["작성중", "반려"].includes(state);
-    });
-    if (!targets.length) return flash("상신할 과거 주차가 없습니다.");
-    if (!window.confirm(`${targets.length}개 과거 주차를 일괄 상신하시겠습니까?`)) return;
+    const startIndex = pastWeeks.indexOf(bulkSubmitStartWeek);
+    const endIndex = pastWeeks.indexOf(bulkSubmitEndWeek);
+    if (startIndex < 0 || endIndex < startIndex) {
+      flash("종료 주차는 시작 주차와 같거나 이후여야 합니다.");
+      return;
+    }
+    const targets = pastWeeks
+      .slice(startIndex, endIndex + 1)
+      .filter((week) => isBulkSubmittable(statusMap[week] ?? "작성중"));
+    if (!targets.length) return flash("선택한 기간에 상신할 주차가 없습니다.");
+    if (!window.confirm(`${bulkSubmitStartWeek}부터 ${bulkSubmitEndWeek}까지 상신 대상 ${targets.length}개 주차를 일괄 상신하시겠습니까?`)) return;
+    setBulkSubmitDialogOpen(false);
     savingRef.current = true;
     setBusy(true);
     let success = 0;
-    for (const week of targets) {
-      const { data: row } = await supabase.from("work_logs").select("data").eq("user_id", session.user.id).eq("week", week).maybeSingle();
-      const data = normalizeData(week, row?.data);
-      data.attendance = data.attendance.map((item) => ({ ...item, start_time: item.start_time || defaultStart, end_time: item.end_time || defaultEnd }));
-      const { error } = await supabase.from("work_logs").upsert({ user_id: session.user.id, email: profile.email, week, status: "서명 대기", data }, { onConflict: "user_id,week" });
-      if (!error) success += 1;
+    let failed = 0;
+    try {
+      for (const week of targets) {
+        const { data: row, error: readError } = await supabase.from("work_logs").select("data").eq("user_id", session.user.id).eq("week", week).maybeSingle();
+        if (readError) {
+          failed += 1;
+          continue;
+        }
+        const data = normalizeData(week, row?.data);
+        data.attendance = data.attendance.map((item) => ({ ...item, start_time: item.start_time || defaultStart, end_time: item.end_time || defaultEnd }));
+        const { error } = await supabase.from("work_logs").upsert({ user_id: session.user.id, email: profile.email, week, status: "서명 대기", data }, { onConflict: "user_id,week" });
+        if (error) failed += 1;
+        else success += 1;
+      }
+      await loadStatusMap(selectedEmail);
+      await loadLog(selectedWeek, selectedEmail);
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
     }
-    await loadStatusMap(selectedEmail);
-    await loadLog(selectedWeek, selectedEmail);
-    savingRef.current = false;
-    setBusy(false);
-    flash(`${success}개 주차를 상신했습니다.`);
+    flash(failed ? `${success}개 주차를 상신했고, ${failed}개는 처리하지 못했습니다.` : `${success}개 주차를 상신했습니다.`);
   }
 
   async function bulkApprove() {
@@ -829,7 +882,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
             <button onClick={openPdfDialog} disabled={pdfExporting || busy || saving}>
               {pdfExporting ? "PDF 생성 중…" : "기간별 PDF 저장"}
             </button>
-            {profile.role === "직원" && <button onClick={bulkSubmit}>과거 주차 일괄 상신</button>}
+            {profile.role === "직원" && <button onClick={openBulkSubmitDialog} disabled={busy || saving}>과거 주차 일괄 상신</button>}
             {profile.role === "관리자" && <button onClick={bulkApprove}>대기 문서 일괄 서명</button>}
           </div>
         )}
@@ -849,7 +902,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
           </div>
         )}
 
-        <button className="logout" onClick={() => supabase.auth.signOut()}>로그아웃</button>
+        <button className="logout" onClick={logout} disabled={saving}>로그아웃</button>
       </aside>
 
       <main className="main-area">
@@ -940,6 +993,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
       {bulkProgress?.active && <BulkApprovalOverlay progress={bulkProgress} />}
       {pdfDialogOpen && <PdfRangeDialog weeks={weeks} startWeek={pdfStartWeek} endWeek={pdfEndWeek} onStartChange={setPdfStartWeek} onEndChange={setPdfEndWeek} onClose={() => setPdfDialogOpen(false)} onDownload={downloadPdfRange} />}
+      {bulkSubmitDialogOpen && <BulkSubmitRangeDialog weeks={pastWeeks} statusMap={statusMap} startWeek={bulkSubmitStartWeek} endWeek={bulkSubmitEndWeek} onStartChange={setBulkSubmitStartWeek} onEndChange={setBulkSubmitEndWeek} onClose={() => setBulkSubmitDialogOpen(false)} onSubmit={bulkSubmit} />}
       {!bulkProgress?.active && (busy || saving || pdfExporting) && <div className="loading-overlay"><div className="spinner" /><span>{pdfExporting ? `${pdfCompleted} / ${pdfTotal}개 PDF 생성 후 압축 중입니다` : saving ? "저장 중입니다" : "데이터를 불러오는 중입니다"}</span></div>}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
@@ -987,6 +1041,55 @@ function PdfRangeDialog({ weeks, startWeek, endWeek, onStartChange, onEndChange,
         <div className="pdf-range-actions">
           <button type="button" className="button secondary" onClick={onClose}>취소</button>
           <button type="button" className="button primary" onClick={onDownload} disabled={!count}>{count ? `${count}개 PDF 압축 저장` : "기간을 확인하세요"}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BulkSubmitRangeDialog({ weeks, statusMap, startWeek, endWeek, onStartChange, onEndChange, onClose, onSubmit }: {
+  weeks: string[];
+  statusMap: Record<string, string>;
+  startWeek: string;
+  endWeek: string;
+  onStartChange: (week: string) => void;
+  onEndChange: (week: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const startIndex = weeks.indexOf(startWeek);
+  const endIndex = weeks.indexOf(endWeek);
+  const rangeWeeks = startIndex >= 0 && endIndex >= startIndex ? weeks.slice(startIndex, endIndex + 1) : [];
+  const targets = rangeWeeks.filter((week) => isBulkSubmittable(statusMap[week] ?? "작성중"));
+  const startDate = mondayOfWeek(startWeek);
+  const endDate = mondayOfWeek(endWeek);
+  endDate.setDate(endDate.getDate() + 4);
+  return (
+    <div className="pdf-range-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+      <section className="pdf-range-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-submit-range-title">
+        <span className="pdf-range-kicker">과거 주차 일괄 상신</span>
+        <h2 id="bulk-submit-range-title">상신할 기간을 선택하세요</h2>
+        <p>선택한 과거 기간 중 작성중 또는 반려 상태인 주차만 서명 대기로 상신합니다.</p>
+        <div className="pdf-range-fields">
+          <label>시작 주차
+            <select value={startWeek} onChange={(event) => onStartChange(event.target.value)}>
+              {weeks.map((week) => <option key={week}>{week}</option>)}
+            </select>
+          </label>
+          <span aria-hidden="true">→</span>
+          <label>종료 주차
+            <select value={endWeek} onChange={(event) => onEndChange(event.target.value)}>
+              {weeks.map((week) => <option key={week}>{week}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className={`pdf-range-summary ${rangeWeeks.length && targets.length ? "" : "invalid"}`}>
+          <strong>{rangeWeeks.length ? `${targets.length}개 상신 대상` : "기간 확인 필요"}</strong>
+          <span>{rangeWeeks.length ? `${isoDate(startDate)} — ${isoDate(endDate)} · 선택 ${rangeWeeks.length}개 주차` : "종료 주차를 시작 주차 이후로 선택하세요."}</span>
+        </div>
+        <div className="pdf-range-actions">
+          <button type="button" className="button secondary" onClick={onClose}>취소</button>
+          <button type="button" className="button primary" onClick={onSubmit} disabled={!targets.length}>{targets.length ? `${targets.length}개 주차 상신` : "상신 대상 없음"}</button>
         </div>
       </section>
     </div>
