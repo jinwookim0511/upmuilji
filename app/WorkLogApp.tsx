@@ -306,6 +306,8 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   const bulkApprovingRef = useRef(false);
   const saveCurrentRef = useRef<(showMessage?: boolean) => Promise<boolean>>(async () => false);
   const selectWeekRef = useRef<(week: string) => Promise<void>>(async () => undefined);
+  const sessionUserId = session?.user.id ?? null;
+  const sessionUserEmail = session?.user.email ?? "";
 
   const currentUser = useMemo(() => {
     if (!profile) return null;
@@ -401,21 +403,21 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   }, [supabase]);
 
   useEffect(() => {
-    if (!session?.user) return;
+    if (!sessionUserId) return;
     let active = true;
     async function loadProfile() {
       setBusy(true);
       const { data, error } = await supabase
         .from("user_roles")
         .select("id, role, name, email")
-        .eq("id", session!.user.id)
+        .eq("id", sessionUserId)
         .maybeSingle();
       if (!active) return;
       if (error) flash(`사용자 정보를 불러오지 못했습니다: ${error.message}`);
       const nextProfile: RoleRow = data ?? {
-        id: session!.user.id,
-        email: session!.user.email ?? "",
-        name: session!.user.email?.split("@")[0] ?? "사용자",
+        id: sessionUserId,
+        email: sessionUserEmail,
+        name: sessionUserEmail.split("@")[0] || "사용자",
         role: "직원",
       };
       setProfile(nextProfile);
@@ -442,7 +444,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     return () => {
       active = false;
     };
-  }, [flash, session, supabase, weeks]);
+  }, [flash, sessionUserEmail, sessionUserId, supabase, weeks]);
 
   useEffect(() => {
     if (!profile || !weeks.includes(selectedWeek)) return;
@@ -460,12 +462,12 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   }, [supabase]);
 
   const loadLog = useCallback(async (week: string, email: string) => {
-    if (!session?.user || !email) return;
+    if (!sessionUserId || !email) return;
     const requestId = loadLogRequestRef.current + 1;
     loadLogRequestRef.current = requestId;
     setBusy(true);
     let query = supabase.from("work_logs").select("id, user_id, email, week, status, data").eq("week", week);
-    query = profile?.role === "관리자" ? query.eq("email", email) : query.eq("user_id", session.user.id);
+    query = profile?.role === "관리자" ? query.eq("email", email) : query.eq("user_id", sessionUserId);
     const { data, error } = await query.limit(1).maybeSingle();
     if (requestId !== loadLogRequestRef.current) return;
     if (error) flash(`업무일지를 불러오지 못했습니다: ${error.message}`);
@@ -477,7 +479,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     dirtyRef.current = false;
     setDirty(false);
     setBusy(false);
-  }, [flash, profile?.role, session, supabase]);
+  }, [flash, profile?.role, sessionUserId, supabase]);
 
   const loadLeaveTotal = useCallback(async (email: string) => {
     const { data } = await supabase.from("leave_entitlements").select("total_days").eq("email", email).maybeSingle();
@@ -783,7 +785,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
   async function selectWeek(week: string) {
     if (week === selectedWeek || savingRef.current) return;
-    await saveBeforeAction(() => setSelectedWeek(week));
+    await saveBeforeAction(() => {
+      if (profile) saveWeekSelection(profile.id, week);
+      setSelectedWeek(week);
+    });
   }
 
   useEffect(() => {
