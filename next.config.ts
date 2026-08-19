@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
       "app",
       "api",
       "approval-email",
-      "NanumGothicCoding-Regular.ttf",
+      "NanumGothic-Regular.ttf",
     )).toString("base64");
     config.plugins.push(new webpack.DefinePlugin({
       PDF_FONT_BASE64: JSON.stringify(fontBase64),

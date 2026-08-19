@@ -63,3 +63,23 @@ test("saves an employee's draft before signing out", async () => {
   assert.ok(logout.indexOf("await saveCurrent(false)") < logout.indexOf("await supabase.auth.signOut()"));
   assert.match(workLogApp, /className="logout" onClick=\{logout\} disabled=\{saving\}/);
 });
+
+test("generates Korean PDFs with a subsetted Nanum Gothic font", async () => {
+  const [packageJson, nextConfig, pdfGenerator] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/approval-email/work-log-pdf.ts", import.meta.url), "utf8"),
+  ]);
+  const pkg = JSON.parse(packageJson);
+
+  assert.equal(pkg.dependencies.pdfkit, "0.19.1");
+  assert.equal(pkg.dependencies["@fontsource/nanum-gothic"], undefined);
+  assert.equal(pkg.dependencies["pdf-lib"], undefined);
+  assert.equal(pkg.dependencies["@pdf-lib/fontkit"], undefined);
+  assert.equal(pkg.dependencies["@fontsource/nanum-gothic-coding"], undefined);
+  assert.match(nextConfig, /NanumGothic-Regular\.ttf/);
+  assert.match(pdfGenerator, /import PDFDocument from "pdfkit"/);
+  assert.match(pdfGenerator, /registerFont\(FONT_NAME, fontData\)/);
+  assert.match(pdfGenerator, /creates a subset and adds only glyphs used/);
+  assert.doesNotMatch(pdfGenerator, /subset:\s*false|NanumGothicCoding/);
+});
