@@ -71,6 +71,10 @@ test("restores the last selected week after a reload", async () => {
   assert.match(workLogApp, /savedWeek && weeks\.includes\(savedWeek\) \? savedWeek : null/);
   assert.match(workLogApp, /setSelectedWeek\(savedWeekSelection\(nextProfile\.id, weeks\) \?\? closestWeekToToday\(weeks\)\)/);
   assert.match(workLogApp, /saveWeekSelection\(profile\.id, selectedWeek\)/);
+  assert.match(workLogApp, /const sessionUserId = session\?\.user\.id \?\? null/);
+  assert.match(workLogApp, /\}, \[flash, sessionUserEmail, sessionUserId, supabase, weeks\]\)/);
+  assert.match(workLogApp, /if \(profile\) saveWeekSelection\(profile\.id, week\);[\s\S]*setSelectedWeek\(week\)/);
+  assert.doesNotMatch(workLogApp, /\}, \[flash, session, supabase, weeks\]\)/);
 });
 
 test("autosaves employee drafts across interactions and browser exit", async () => {
