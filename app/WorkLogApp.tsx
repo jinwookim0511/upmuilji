@@ -306,6 +306,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   const bulkApprovingRef = useRef(false);
   const saveCurrentRef = useRef<(showMessage?: boolean) => Promise<boolean>>(async () => false);
   const selectWeekRef = useRef<(week: string) => Promise<void>>(async () => undefined);
+  const restoredWeekUserRef = useRef<string | null>(null);
   const sessionUserId = session?.user.id ?? null;
   const sessionUserEmail = session?.user.email ?? "";
 
@@ -392,11 +393,12 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
       setSession(data.session);
       setBusy(false);
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
       if (!nextSession) {
         setProfile(null);
         setUsers([]);
+        if (event === "SIGNED_OUT") restoredWeekUserRef.current = null;
       }
     });
     return () => data.subscription.unsubscribe();
@@ -421,7 +423,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
         role: "직원",
       };
       setProfile(nextProfile);
-      setSelectedWeek(savedWeekSelection(nextProfile.id, weeks) ?? closestWeekToToday(weeks));
+      if (restoredWeekUserRef.current !== nextProfile.id) {
+        restoredWeekUserRef.current = nextProfile.id;
+        setSelectedWeek(savedWeekSelection(nextProfile.id, weeks) ?? closestWeekToToday(weeks));
+      }
 
       if (nextProfile.role === "관리자") {
         const { data: staff } = await supabase.from("user_roles").select("id, role, name, email");
