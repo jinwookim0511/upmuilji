@@ -132,6 +132,8 @@ input, select, textarea { color: var(--ink); }
 
 .task-table, .special-table { border-top: 1px solid var(--ink); }
 .table-head, .task-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px 28px; }
+.day-card .table-head, .day-card .task-row { grid-template-columns: minmax(0, 1fr) 55px 28px; }
+.day-card .table-head span:nth-child(2) { padding-inline: 4px; white-space: nowrap; }
 .table-head { min-height: 23px; align-items: center; color: #526057; background: #eef1ec; border-bottom: 1px solid #cdd4cf; font-size: 8px; font-weight: 800; text-transform: uppercase; }
 .table-head span { padding: 0 9px; }
 .task-row { min-height: 27px; border-bottom: 1px solid var(--line); }
@@ -300,6 +302,7 @@ input, select, textarea { color: var(--ink); }
   .day-card > header { align-items: flex-start; flex-direction: column; }
   .attendance { justify-content: flex-start; }
   .table-head, .task-row { grid-template-columns: minmax(0, 1fr) 72px 25px; }
+  .day-card .table-head, .day-card .task-row { grid-template-columns: minmax(0, 1fr) 36px 25px; }
   .history-summary { min-height: 155px; padding: 24px; }
   .summary-art { width: 80px; height: 80px; font-size: 36px; }
   .history-table { overflow-x: auto; }
