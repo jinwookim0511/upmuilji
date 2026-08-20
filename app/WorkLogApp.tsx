@@ -1406,7 +1406,7 @@ function AuthScreen({
       <section className="auth-panel">
         <div className="auth-card">
           <div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setFeedback(null); }}>로그인</button><button className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setFeedback(null); }}>회원가입</button></div>
-          <div className="auth-heading"><h2>{mode === "login" ? "다시 만나 반갑습니다" : "업무일지 시작하기"}</h2><p>{mode === "login" ? "등록된 계정으로 로그인하세요." : "실명과 이메일로 새 계정을 만드세요."}</p></div>
+          <div className="auth-heading"><h2>{mode === "login" ? "다시 만나 반갑습니다" : "업무일지 시작하기"}</h2><p>{mode === "login" ? "등록된 계정으로 로그인하세요." : "실명과 이메일로 새 계정을 만드세요. Gmail 또는 네이버 메일 사용을 권장합니다."}</p></div>
           <form onSubmit={submit}>
             {mode === "signup" && <label>이름<input required value={name} onChange={(event) => { setName(event.target.value); setFeedback(null); }} placeholder="실명 입력" /></label>}
             <label>이메일<input type="email" required value={email} onChange={(event) => { setEmail(event.target.value); setFeedback(null); }} placeholder="email@company.com" /></label>

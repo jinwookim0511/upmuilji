@@ -81,6 +81,12 @@ test("restores the last selected week after a reload", async () => {
   assert.match(workLogApp, /if \(!sessionUserId \|\| profile\?\.id === sessionUserId\) return;/);
 });
 
+test("recommends Gmail or Naver Mail when creating an account", async () => {
+  const workLogApp = await readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8");
+
+  assert.match(workLogApp, /실명과 이메일로 새 계정을 만드세요\. Gmail 또는 네이버 메일 사용을 권장합니다\./);
+});
+
 test("autosaves employee drafts only on app controls and browser exit", async () => {
   const [workLogApp, migration] = await Promise.all([
     readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
