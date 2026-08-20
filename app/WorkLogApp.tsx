@@ -738,12 +738,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     }
     window.addEventListener("beforeunload", persistDraftOnExit);
     window.addEventListener("pagehide", persistDraftOnExit);
-    window.addEventListener("blur", persistDraftOnExit);
     document.addEventListener("visibilitychange", saveWhenHidden);
     return () => {
       window.removeEventListener("beforeunload", persistDraftOnExit);
       window.removeEventListener("pagehide", persistDraftOnExit);
-      window.removeEventListener("blur", persistDraftOnExit);
       document.removeEventListener("visibilitychange", saveWhenHidden);
     };
   }, [canEdit, persistDraftOnExit, profile?.role]);

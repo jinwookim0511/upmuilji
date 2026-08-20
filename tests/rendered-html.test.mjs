@@ -91,8 +91,8 @@ test("autosaves employee drafts across interactions and browser exit", async () 
   assert.match(workLogApp, /keepalive: true/);
   assert.match(workLogApp, /window\.addEventListener\("beforeunload", persistDraftOnExit\)/);
   assert.match(workLogApp, /window\.addEventListener\("pagehide", persistDraftOnExit\)/);
-  assert.match(workLogApp, /window\.addEventListener\("blur", persistDraftOnExit\)/);
   assert.match(workLogApp, /document\.addEventListener\("visibilitychange", saveWhenHidden\)/);
+  assert.doesNotMatch(workLogApp, /addEventListener\("blur", persistDraftOnExit\)/);
   assert.doesNotMatch(workLogApp, /addEventListener\("focus",[^\n]*(loadLog|loadProfile|loadStatusMap)/);
   assert.match(workLogApp, /document\.addEventListener\("click", saveAfterInteraction\)/);
   assert.match(workLogApp, /document\.addEventListener\("change", saveAfterInteraction\)/);
