@@ -132,6 +132,14 @@ test("moves between weeks with compact buttons and saves employee drafts first",
   assert.match(workLogApp, /if \(profile\?\.role !== "직원" \|\| !canEdit\) return;/);
 });
 
+test("halves only the daily work progress column", async () => {
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(styles, /\.table-head, \.task-row \{ display: grid; grid-template-columns: minmax\(0, 1fr\) 110px 28px; \}/);
+  assert.match(styles, /\.day-card \.table-head, \.day-card \.task-row \{ grid-template-columns: minmax\(0, 1fr\) 55px 28px; \}/);
+  assert.match(styles, /\.day-card \.table-head, \.day-card \.task-row \{ grid-template-columns: minmax\(0, 1fr\) 36px 25px; \}/);
+});
+
 test("generates Korean PDFs with a subsetted Nanum Gothic font", async () => {
   const [packageJson, nextConfig, pdfGenerator] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
