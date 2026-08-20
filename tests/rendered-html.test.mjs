@@ -72,12 +72,13 @@ test("restores the last selected week after a reload", async () => {
   assert.match(workLogApp, /setSelectedWeek\(savedWeekSelection\(nextProfile\.id, weeks\) \?\? closestWeekToToday\(weeks\)\)/);
   assert.match(workLogApp, /saveWeekSelection\(profile\.id, selectedWeek\)/);
   assert.match(workLogApp, /const sessionUserId = session\?\.user\.id \?\? null/);
-  assert.match(workLogApp, /\}, \[flash, sessionUserEmail, sessionUserId, supabase, weeks\]\)/);
+  assert.match(workLogApp, /\}, \[flash, profile\?\.id, sessionUserEmail, sessionUserId, supabase, weeks\]\)/);
   assert.match(workLogApp, /if \(profile\) saveWeekSelection\(profile\.id, week\);[\s\S]*setSelectedWeek\(week\)/);
   assert.doesNotMatch(workLogApp, /\}, \[flash, session, supabase, weeks\]\)/);
   assert.match(workLogApp, /const restoredWeekUserRef = useRef<string \| null>\(null\)/);
   assert.match(workLogApp, /if \(restoredWeekUserRef\.current !== nextProfile\.id\) \{[\s\S]*restoredWeekUserRef\.current = nextProfile\.id;[\s\S]*setSelectedWeek\(savedWeekSelection/);
   assert.match(workLogApp, /if \(event === "SIGNED_OUT"\) restoredWeekUserRef\.current = null/);
+  assert.match(workLogApp, /if \(!sessionUserId \|\| profile\?\.id === sessionUserId\) return;/);
 });
 
 test("autosaves employee drafts across interactions and browser exit", async () => {
@@ -90,7 +91,9 @@ test("autosaves employee drafts across interactions and browser exit", async () 
   assert.match(workLogApp, /keepalive: true/);
   assert.match(workLogApp, /window\.addEventListener\("beforeunload", persistDraftOnExit\)/);
   assert.match(workLogApp, /window\.addEventListener\("pagehide", persistDraftOnExit\)/);
+  assert.match(workLogApp, /window\.addEventListener\("blur", persistDraftOnExit\)/);
   assert.match(workLogApp, /document\.addEventListener\("visibilitychange", saveWhenHidden\)/);
+  assert.doesNotMatch(workLogApp, /addEventListener\("focus",[^\n]*(loadLog|loadProfile|loadStatusMap)/);
   assert.match(workLogApp, /document\.addEventListener\("click", saveAfterInteraction\)/);
   assert.match(workLogApp, /document\.addEventListener\("change", saveAfterInteraction\)/);
   assert.match(workLogApp, /async function selectView\(nextView: View\)[\s\S]*await saveBeforeAction/);

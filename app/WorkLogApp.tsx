@@ -405,7 +405,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   }, [supabase]);
 
   useEffect(() => {
-    if (!sessionUserId) return;
+    // Token refreshes may occur when a browser window regains focus.  The
+    // session token can update, but the already loaded user's profile and
+    // work log must remain on screen until the user explicitly changes them.
+    if (!sessionUserId || profile?.id === sessionUserId) return;
     let active = true;
     async function loadProfile() {
       setBusy(true);
@@ -449,7 +452,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     return () => {
       active = false;
     };
-  }, [flash, sessionUserEmail, sessionUserId, supabase, weeks]);
+  }, [flash, profile?.id, sessionUserEmail, sessionUserId, supabase, weeks]);
 
   useEffect(() => {
     if (!profile || !weeks.includes(selectedWeek)) return;
@@ -735,10 +738,12 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     }
     window.addEventListener("beforeunload", persistDraftOnExit);
     window.addEventListener("pagehide", persistDraftOnExit);
+    window.addEventListener("blur", persistDraftOnExit);
     document.addEventListener("visibilitychange", saveWhenHidden);
     return () => {
       window.removeEventListener("beforeunload", persistDraftOnExit);
       window.removeEventListener("pagehide", persistDraftOnExit);
+      window.removeEventListener("blur", persistDraftOnExit);
       document.removeEventListener("visibilitychange", saveWhenHidden);
     };
   }, [canEdit, persistDraftOnExit, profile?.role]);
