@@ -78,6 +78,11 @@ type DraftSnapshot = {
 const DAYS = ["월", "화", "수", "목", "금"];
 const LEAVE_TYPES = ["-", "연차", "반차", "반반차", "그외법정휴가", "경조사", "병가", "공휴일"];
 const AUTO_SAVE_CLICK_TARGETS = "button, select, a, [role='button'], [role='menuitem']";
+const DISPLAY_ONLY_TEXT = new Set([
+  "업무 내용을 입력하세요",
+  "특근 업무 내용",
+  "이번 주 공유할 내용이나 특이사항을 입력하세요",
+]);
 const KOREAN_COLLATOR = new Intl.Collator("ko-KR", { sensitivity: "base" });
 
 function employeeSelectionStorageKey(adminId: string) {
@@ -203,7 +208,41 @@ function blankTask(): Task {
 }
 
 function blankSpecial(): SpecialTask {
-  return { 날짜: "", 요일: "", "시작 시각": "", "소요 시간": "60분", "업무 내용": "", 진행률: "" };
+  return { 날짜: "", 요일: "", "시작 시각": "", "소요 시간": "", "업무 내용": "", 진행률: "" };
+}
+
+function removeDisplayOnlyText(value: string | undefined) {
+  const text = value ?? "";
+  return DISPLAY_ONLY_TEXT.has(text.trim()) ? "" : text;
+}
+
+function sanitizeTask(task: Task): Task {
+  return { ...task, 업무내용: removeDisplayOnlyText(task.업무내용), 진행률: task.진행률 ?? "" };
+}
+
+function sanitizeSpecialTask(task: SpecialTask): SpecialTask {
+  const sanitized: SpecialTask = {
+    날짜: task.날짜 ?? "",
+    요일: task.요일 ?? "",
+    "시작 시각": task["시작 시각"] ?? "",
+    "소요 시간": task["소요 시간"] ?? "",
+    "업무 내용": removeDisplayOnlyText(task["업무 내용"]),
+    진행률: task.진행률 ?? "",
+  };
+  const hasWorkDetail = Boolean(sanitized.날짜 || sanitized.요일 || sanitized["시작 시각"] || sanitized["업무 내용"] || sanitized.진행률);
+  return !hasWorkDetail && sanitized["소요 시간"] === "60분"
+    ? { ...sanitized, "소요 시간": "" }
+    : sanitized;
+}
+
+function sanitizeWeekData(data: WeekData): WeekData {
+  return {
+    daily: data.daily.map(sanitizeTask),
+    attendance: data.attendance,
+    special: data.special.map(sanitizeSpecialTask),
+    weekly_goals: data.weekly_goals.map(sanitizeTask),
+    weekly_comment: removeDisplayOnlyText(data.weekly_comment),
+  };
 }
 
 function defaultWeekData(week: string): WeekData {
@@ -228,13 +267,13 @@ function defaultWeekData(week: string): WeekData {
 
 function normalizeData(week: string, value: Partial<WeekData> | null | undefined): WeekData {
   const fallback = defaultWeekData(week);
-  return {
+  return sanitizeWeekData({
     daily: Array.isArray(value?.daily) ? value.daily : fallback.daily,
     attendance: Array.isArray(value?.attendance) ? value.attendance : fallback.attendance,
     special: Array.isArray(value?.special) && value.special.length ? value.special : fallback.special,
     weekly_goals: Array.isArray(value?.weekly_goals) && value.weekly_goals.length ? value.weekly_goals : fallback.weekly_goals,
     weekly_comment: value?.weekly_comment ?? "",
-  };
+  });
 }
 
 function statusClass(status: string) {
@@ -500,7 +539,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
       .select("id, user_id, email, week, status, data")
       .eq("email", email)
       .order("week", { ascending: true });
-    setHistoryLogs((data ?? []) as LogRow[]);
+    setHistoryLogs(((data ?? []) as LogRow[]).map((log) => ({
+      ...log,
+      data: log.data ? normalizeData(log.week, log.data) : null,
+    })));
   }, [supabase]);
 
   useEffect(() => {
@@ -520,7 +562,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
   function markChanged(updater: (value: WeekData) => WeekData) {
     if (profile?.role !== "직원" || !canEdit) return;
-    const nextWeekData = updater(weekDataRef.current);
+    const nextWeekData = sanitizeWeekData(updater(weekDataRef.current));
     draftVersionRef.current += 1;
     weekDataRef.current = nextWeekData;
     if (draftSnapshotRef.current) {
@@ -553,7 +595,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
       email: snapshot.email,
       week: snapshot.week,
       status: snapshot.status,
-      data: weekDataRef.current,
+      data: sanitizeWeekData(weekDataRef.current),
     };
     const savePromise = (async () => {
       const { error } = await supabase.from("work_logs").upsert(payload, { onConflict: "user_id,week" });
@@ -604,7 +646,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
         email: snapshot.email,
         week: snapshot.week,
         status: snapshot.status,
-        data: snapshot.data,
+        data: sanitizeWeekData(snapshot.data),
       }),
     }).then((response) => {
       if (response.ok && draftVersionRef.current === snapshot.version && draftSnapshotRef.current?.week === snapshot.week) {
@@ -815,14 +857,14 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     if (!session?.user || !currentUser || profile?.role !== "직원" || savingRef.current) return;
     if (!window.confirm("현재 주차를 서명 대기 상태로 상신하시겠습니까?")) return;
     fillDefaultTimes();
-    const dataWithTimes: WeekData = {
+    const dataWithTimes = sanitizeWeekData({
       ...weekData,
       attendance: weekData.attendance.map((item) => ({
         ...item,
         start_time: item.start_time || defaultStart,
         end_time: item.end_time || defaultEnd,
       })),
-    };
+    });
     setWeekData(dataWithTimes);
     savingRef.current = true;
     setSaving(true);
@@ -909,8 +951,11 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
           continue;
         }
         const data = normalizeData(week, row?.data);
-        data.attendance = data.attendance.map((item) => ({ ...item, start_time: item.start_time || defaultStart, end_time: item.end_time || defaultEnd }));
-        const { error } = await supabase.from("work_logs").upsert({ user_id: session.user.id, email: profile.email, week, status: "서명 대기", data }, { onConflict: "user_id,week" });
+        const dataWithTimes = sanitizeWeekData({
+          ...data,
+          attendance: data.attendance.map((item) => ({ ...item, start_time: item.start_time || defaultStart, end_time: item.end_time || defaultEnd })),
+        });
+        const { error } = await supabase.from("work_logs").upsert({ user_id: session.user.id, email: profile.email, week, status: "서명 대기", data: dataWithTimes }, { onConflict: "user_id,week" });
         if (error) failed += 1;
         else success += 1;
       }
@@ -1119,7 +1164,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
                   {canEdit && <button className="add-row no-print" onClick={() => markChanged((current) => ({ ...current, weekly_goals: [...current.weekly_goals, blankTask()] }))}>＋ 목표 추가</button>}
                 </div>
 
-                <label className="weekly-note"><span>주간 메모</span><textarea disabled={!canEdit} value={weekData.weekly_comment} onChange={(event) => markChanged((current) => ({ ...current, weekly_comment: event.target.value }))} placeholder="이번 주 공유할 내용이나 특이사항을 입력하세요" /></label>
+                <label className="weekly-note"><span>주간 메모</span><textarea disabled={!canEdit} value={weekData.weekly_comment} onChange={(event) => markChanged((current) => ({ ...current, weekly_comment: event.target.value }))} placeholder={canEdit ? "이번 주 공유할 내용이나 특이사항을 입력하세요" : undefined} /></label>
               </div>
 
               <SectionTitle number="02" title="요일별 업무 내역" subtitle="출퇴근, 휴가와 업무 진행 상황을 함께 관리합니다" />
@@ -1386,11 +1431,11 @@ function SectionTitle({ number, title, subtitle }: { number: string; title: stri
 }
 
 function TaskRow({ task, disabled, onChange, onRemove }: { task: Task; disabled: boolean; onChange: (field: "업무내용" | "진행률", value: string) => void; onRemove: () => void }) {
-  return <div className="task-row"><input disabled={disabled} value={task.업무내용 ?? ""} onChange={(event) => onChange("업무내용", event.target.value)} placeholder="업무 내용을 입력하세요" /><input disabled={disabled} value={task.진행률 ?? ""} onChange={(event) => onChange("진행률", event.target.value)} placeholder="0%" />{!disabled ? <button className="remove-row no-print" onClick={onRemove} aria-label="행 삭제">×</button> : <span />}</div>;
+  return <div className="task-row"><input disabled={disabled} value={task.업무내용 ?? ""} onChange={(event) => onChange("업무내용", event.target.value)} placeholder={disabled ? undefined : "업무 내용을 입력하세요"} /><input disabled={disabled} value={task.진행률 ?? ""} onChange={(event) => onChange("진행률", event.target.value)} placeholder={disabled ? undefined : "0%"} />{!disabled ? <button className="remove-row no-print" onClick={onRemove} aria-label="행 삭제">×</button> : <span />}</div>;
 }
 
 function SpecialRow({ item, disabled, onChange, onRemove }: { item: SpecialTask; disabled: boolean; onChange: (field: keyof SpecialTask, value: string) => void; onRemove: () => void }) {
-  return <div className="special-row"><input disabled={disabled} value={item.날짜 ?? ""} onChange={(e) => onChange("날짜", e.target.value)} placeholder="2026-01-01" /><input disabled={disabled} value={item.요일 ?? ""} onChange={(e) => onChange("요일", e.target.value)} placeholder="월" /><input disabled={disabled} value={item["시작 시각"] ?? ""} onChange={(e) => onChange("시작 시각", e.target.value)} placeholder="18:00" /><input disabled={disabled} value={item["소요 시간"] ?? ""} onChange={(e) => onChange("소요 시간", e.target.value)} placeholder="60분" /><input disabled={disabled} value={item["업무 내용"] ?? ""} onChange={(e) => onChange("업무 내용", e.target.value)} placeholder="특근 업무 내용" /><input disabled={disabled} value={item.진행률 ?? ""} onChange={(e) => onChange("진행률", e.target.value)} placeholder="100%" />{!disabled ? <button className="remove-row no-print" onClick={onRemove} aria-label="행 삭제">×</button> : <span />}</div>;
+  return <div className="special-row"><input disabled={disabled} value={item.날짜 ?? ""} onChange={(e) => onChange("날짜", e.target.value)} placeholder={disabled ? undefined : "2026-01-01"} /><input disabled={disabled} value={item.요일 ?? ""} onChange={(e) => onChange("요일", e.target.value)} placeholder={disabled ? undefined : "월"} /><input disabled={disabled} value={item["시작 시각"] ?? ""} onChange={(e) => onChange("시작 시각", e.target.value)} placeholder={disabled ? undefined : "18:00"} /><input disabled={disabled} value={item["소요 시간"] ?? ""} onChange={(e) => onChange("소요 시간", e.target.value)} placeholder={disabled ? undefined : "60분"} /><input disabled={disabled} value={item["업무 내용"] ?? ""} onChange={(e) => onChange("업무 내용", e.target.value)} placeholder={disabled ? undefined : "특근 업무 내용"} /><input disabled={disabled} value={item.진행률 ?? ""} onChange={(e) => onChange("진행률", e.target.value)} placeholder={disabled ? undefined : "100%"} />{!disabled ? <button className="remove-row no-print" onClick={onRemove} aria-label="행 삭제">×</button> : <span />}</div>;
 }
 
 function HistoryView({ title, metric, summary, columns, rows, empty }: { title: string; metric: string; summary: string; columns: string[]; rows: string[][]; empty: string }) {
