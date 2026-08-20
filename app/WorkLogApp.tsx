@@ -77,8 +77,7 @@ type DraftSnapshot = {
 
 const DAYS = ["월", "화", "수", "목", "금"];
 const LEAVE_TYPES = ["-", "연차", "반차", "반반차", "그외법정휴가", "경조사", "병가", "공휴일"];
-const AUTO_SAVE_DEBOUNCE_MS = 800;
-const AUTO_SAVE_INTERVAL_MS = 30 * 1000;
+const AUTO_SAVE_CLICK_TARGETS = "button, select, a, [role='button'], [role='menuitem']";
 const KOREAN_COLLATOR = new Intl.Collator("ko-KR", { sensitivity: "base" });
 
 function employeeSelectionStorageKey(adminId: string) {
@@ -305,7 +304,6 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
   const loadLogRequestRef = useRef(0);
   const bulkApprovingRef = useRef(false);
   const saveCurrentRef = useRef<(showMessage?: boolean) => Promise<boolean>>(async () => false);
-  const selectWeekRef = useRef<(week: string) => Promise<void>>(async () => undefined);
   const restoredWeekUserRef = useRef<string | null>(null);
   const sessionUserId = session?.user.id ?? null;
   const sessionUserEmail = session?.user.email ?? "";
@@ -345,6 +343,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
       return true;
     });
   }, [filter, statusMap, weeks]);
+  const selectedWeekIndex = filteredWeeks.indexOf(selectedWeek);
 
   const canEdit = profile?.role === "직원" && ["작성중", "반려"].includes(status);
 
@@ -613,7 +612,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
         setDirty(false);
       }
     }).catch(() => {
-      // The normal debounced save remains the fallback if the browser cancels an exit request.
+      // An exit-time request cannot be retried after the page has been discarded.
     });
   }, [supabasePublishableKey, supabaseUrl]);
 
@@ -714,52 +713,29 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
 
   useEffect(() => {
     if (profile?.role !== "직원" || !canEdit) return;
-    if (!dirty) return;
-    const timer = window.setTimeout(() => {
-      void saveCurrentRef.current(false);
-    }, AUTO_SAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [canEdit, dirty, profile?.role, selectedWeek, status, weekData]);
-
-  useEffect(() => {
-    if (profile?.role !== "직원" || !canEdit) return;
-    const timer = window.setInterval(async () => {
-      if (!dirtyRef.current || savingRef.current) return;
-      const saved = await saveCurrentRef.current(false);
-      if (saved) flash("작성 중인 업무일지를 자동 저장했습니다.");
-    }, AUTO_SAVE_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [canEdit, flash, profile?.role, selectedWeek]);
-
-  useEffect(() => {
-    if (profile?.role !== "직원" || !canEdit) return;
-    function saveWhenHidden() {
-      if (document.visibilityState === "hidden") persistDraftOnExit();
-    }
     window.addEventListener("beforeunload", persistDraftOnExit);
     window.addEventListener("pagehide", persistDraftOnExit);
-    document.addEventListener("visibilitychange", saveWhenHidden);
     return () => {
       window.removeEventListener("beforeunload", persistDraftOnExit);
       window.removeEventListener("pagehide", persistDraftOnExit);
-      document.removeEventListener("visibilitychange", saveWhenHidden);
     };
   }, [canEdit, persistDraftOnExit, profile?.role]);
 
   useEffect(() => {
     if (profile?.role !== "직원") return;
-    function saveAfterInteraction(event: Event) {
+    function saveAfterControlInteraction(event: Event) {
       const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest("button, select, a, [role='button'], [role='menuitem']")) return;
-      window.setTimeout(() => {
+      const selector = event.type === "change" ? "select" : AUTO_SAVE_CLICK_TARGETS;
+      if (!target?.closest(selector)) return;
+      window.queueMicrotask(() => {
         if (dirtyRef.current) void saveCurrentRef.current(false);
-      }, 0);
+      });
     }
-    document.addEventListener("click", saveAfterInteraction);
-    document.addEventListener("change", saveAfterInteraction);
+    document.addEventListener("click", saveAfterControlInteraction);
+    document.addEventListener("change", saveAfterControlInteraction);
     return () => {
-      document.removeEventListener("click", saveAfterInteraction);
-      document.removeEventListener("change", saveAfterInteraction);
+      document.removeEventListener("click", saveAfterControlInteraction);
+      document.removeEventListener("change", saveAfterControlInteraction);
     };
   }, [profile?.role]);
 
@@ -799,28 +775,11 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     });
   }
 
-  useEffect(() => {
-    selectWeekRef.current = selectWeek;
-  });
-
-  useEffect(() => {
-    function handleWeekShortcut(event: KeyboardEvent) {
-      if (!event.shiftKey || event.repeat || view !== "journal") return;
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
-      const previous = event.key === "ArrowLeft" || event.key === "ArrowUp";
-      const next = event.key === "ArrowRight" || event.key === "ArrowDown";
-      if (!previous && !next) return;
-      const currentIndex = filteredWeeks.indexOf(selectedWeek);
-      if (currentIndex < 0) return;
-      const nextIndex = Math.min(filteredWeeks.length - 1, Math.max(0, currentIndex + (previous ? -1 : 1)));
-      if (nextIndex === currentIndex) return;
-      event.preventDefault();
-      void selectWeekRef.current(filteredWeeks[nextIndex]);
-    }
-    window.addEventListener("keydown", handleWeekShortcut);
-    return () => window.removeEventListener("keydown", handleWeekShortcut);
-  }, [filteredWeeks, selectedWeek, view]);
+  function moveWeek(direction: -1 | 1) {
+    if (savingRef.current || selectedWeekIndex < 0) return;
+    const targetWeek = filteredWeeks[selectedWeekIndex + direction];
+    if (targetWeek) void selectWeek(targetWeek);
+  }
 
   async function selectUser(email: string) {
     if (dirty && canEdit && !(await saveCurrent(false))) return;
@@ -1076,7 +1035,6 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
           <button className={view === "leave" ? "active" : ""} onClick={() => selectView("leave")}><span>◷</span> 휴가 사용 내역</button>
           <button className={view === "special" ? "active" : ""} onClick={() => selectView("special")}><span>⌁</span> 특근 모아보기</button>
         </nav>
-        <p className="week-shortcut-hint"><span>주차 이동</span><kbd>Shift</kbd><b>+</b><kbd>←</kbd><b>/</b><kbd>→</kbd></p>
 
         {view === "journal" && (
           <div className="side-actions">
@@ -1116,11 +1074,17 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
         {view === "journal" && (
           <>
             <section className="toolbar no-print">
-              <label>주차
-                <select value={selectedWeek} onChange={(event) => selectWeek(event.target.value)} aria-keyshortcuts="Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" title="Shift + 방향키로 주차 이동">
-                  {filteredWeeks.map((week) => <option key={week}>{week}</option>)}
-                </select>
-              </label>
+              <div className="week-picker">
+                <label>주차
+                  <select value={selectedWeek} onChange={(event) => selectWeek(event.target.value)}>
+                    {filteredWeeks.map((week) => <option key={week}>{week}</option>)}
+                  </select>
+                </label>
+                <div className="week-step-buttons" aria-label="주차 이동">
+                  <button type="button" className="week-step-button" onClick={() => moveWeek(-1)} disabled={saving || selectedWeekIndex <= 0} aria-label="이전 주차로 이동" title="이전 주차로 이동">▲</button>
+                  <button type="button" className="week-step-button" onClick={() => moveWeek(1)} disabled={saving || selectedWeekIndex < 0 || selectedWeekIndex >= filteredWeeks.length - 1} aria-label="다음 주차로 이동" title="다음 주차로 이동">▼</button>
+                </div>
+              </div>
               <label>보기
                 <select value={filter} onChange={(event) => selectFilter(event.target.value)}>
                   <option>전체</option><option>부센터장 서명 전</option><option>센터장 서명 전</option><option>서명 완료</option><option>작성중</option>

@@ -81,21 +81,26 @@ test("restores the last selected week after a reload", async () => {
   assert.match(workLogApp, /if \(!sessionUserId \|\| profile\?\.id === sessionUserId\) return;/);
 });
 
-test("autosaves employee drafts across interactions and browser exit", async () => {
+test("autosaves employee drafts only on app controls and browser exit", async () => {
   const [workLogApp, migration] = await Promise.all([
     readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260819075850_protect_admin_work_log_content.sql", import.meta.url), "utf8"),
   ]);
 
-  assert.match(workLogApp, /const AUTO_SAVE_DEBOUNCE_MS = 800/);
   assert.match(workLogApp, /keepalive: true/);
   assert.match(workLogApp, /window\.addEventListener\("beforeunload", persistDraftOnExit\)/);
   assert.match(workLogApp, /window\.addEventListener\("pagehide", persistDraftOnExit\)/);
-  assert.match(workLogApp, /document\.addEventListener\("visibilitychange", saveWhenHidden\)/);
+  assert.doesNotMatch(workLogApp, /AUTO_SAVE_DEBOUNCE_MS|AUTO_SAVE_INTERVAL_MS/);
+  assert.doesNotMatch(workLogApp, /setInterval\(/);
+  assert.doesNotMatch(workLogApp, /visibilitychange/);
   assert.doesNotMatch(workLogApp, /addEventListener\("blur", persistDraftOnExit\)/);
   assert.doesNotMatch(workLogApp, /addEventListener\("focus",[^\n]*(loadLog|loadProfile|loadStatusMap)/);
-  assert.match(workLogApp, /document\.addEventListener\("click", saveAfterInteraction\)/);
-  assert.match(workLogApp, /document\.addEventListener\("change", saveAfterInteraction\)/);
+  assert.match(workLogApp, /const AUTO_SAVE_CLICK_TARGETS = "button, select, a, \[role='button'\], \[role='menuitem'\]"/);
+  assert.match(workLogApp, /const selector = event\.type === "change" \? "select" : AUTO_SAVE_CLICK_TARGETS/);
+  assert.match(workLogApp, /window\.queueMicrotask\(\(\) => \{[\s\S]*if \(dirtyRef\.current\) void saveCurrentRef\.current\(false\)/);
+  assert.match(workLogApp, /document\.addEventListener\("click", saveAfterControlInteraction\)/);
+  assert.match(workLogApp, /document\.addEventListener\("change", saveAfterControlInteraction\)/);
+  assert.doesNotMatch(workLogApp, /handleWeekShortcut|selectWeekRef|aria-keyshortcuts/);
   assert.match(workLogApp, /async function selectView\(nextView: View\)[\s\S]*await saveBeforeAction/);
   assert.match(workLogApp, /async function selectFilter\(nextFilter: string\)[\s\S]*await saveBeforeAction/);
   assert.match(workLogApp, /if \(profile\?\.role !== "직원" \|\| !canEdit\) return;/);
@@ -109,6 +114,22 @@ test("autosaves employee drafts across interactions and browser exit", async () 
   assert.match(migration, /new\.data is distinct from old\.data/);
   assert.match(migration, /role = '관리자'/);
   assert.match(migration, /errcode = '42501'/);
+});
+
+test("moves between weeks with compact buttons and saves employee drafts first", async () => {
+  const [workLogApp, styles] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(`${workLogApp}\n${styles}`, /week-shortcut-hint|aria-keyshortcuts|handleWeekShortcut|selectWeekRef/);
+  assert.match(workLogApp, /function moveWeek\(direction: -1 \| 1\)[\s\S]*const targetWeek = filteredWeeks\[selectedWeekIndex \+ direction\][\s\S]*void selectWeek\(targetWeek\)/);
+  assert.match(workLogApp, /async function selectWeek\(week: string\)[\s\S]*await saveBeforeAction\([\s\S]*setSelectedWeek\(week\)/);
+  assert.match(workLogApp, /while \(profile\?\.role === "직원" && dirtyRef\.current\)[\s\S]*saveCurrentRef\.current\(false\)/);
+  assert.match(workLogApp, /aria-label="이전 주차로 이동"/);
+  assert.match(workLogApp, /aria-label="다음 주차로 이동"/);
+  assert.match(styles, /\.week-step-button \{ width: 22px; min-height: 15px;/);
+  assert.match(workLogApp, /if \(profile\?\.role !== "직원" \|\| !canEdit\) return;/);
 });
 
 test("generates Korean PDFs with a subsetted Nanum Gothic font", async () => {
