@@ -51,6 +51,11 @@ const INK = "#1f2630";
 const MUTED = "#5c6673";
 const PALE = "#f2f5f7";
 const ACCENT = "#146451";
+const DISPLAY_ONLY_TEXT = new Set([
+  "업무 내용을 입력하세요",
+  "특근 업무 내용",
+  "이번 주 공유할 내용이나 특이사항을 입력하세요",
+]);
 
 function fontBytes() {
   const encoded = typeof PDF_FONT_BASE64 === "string" ? PDF_FONT_BASE64 : "";
@@ -76,7 +81,12 @@ function isoDate(date: Date) {
 
 function clean(value: unknown, fallback = "-") {
   const text = typeof value === "string" ? value.replace(/\r/g, "").trim() : "";
-  return text || fallback;
+  return text && !DISPLAY_ONLY_TEXT.has(text) ? text : fallback;
+}
+
+function isDefaultSpecialTask(item: SpecialTask) {
+  return clean(item["소요 시간"], "") === "60분"
+    && ![item.날짜, item.요일, item["시작 시각"], item["업무 내용"], item.진행률].some((value) => clean(value, ""));
 }
 
 function selectFont(document: PDFKit.PDFDocument, size: number, color = INK) {
@@ -263,7 +273,7 @@ export async function createWorkLogPdf(
   sectionTitle(context, "03", "특근 및 초과 근무");
   const specialWidths = [72, 38, 55, 64, CONTENT_WIDTH - 301, 72];
   tableRow(context, ["날짜", "요일", "시작", "소요 시간", "업무 내용", "진행률"], specialWidths, { header: true });
-  const special = data.special?.filter((item) => Object.values(item).some((value) => clean(value, ""))) ?? [];
+  const special = data.special?.filter((item) => !isDefaultSpecialTask(item) && Object.values(item).some((value) => clean(value, ""))) ?? [];
   if (special.length) {
     special.forEach((item) => tableRow(context, [clean(item.날짜), clean(item.요일), clean(item["시작 시각"]), clean(item["소요 시간"]), clean(item["업무 내용"]), clean(item.진행률)], specialWidths));
   } else {

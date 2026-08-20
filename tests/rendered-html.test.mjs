@@ -104,9 +104,9 @@ test("autosaves employee drafts only on app controls and browser exit", async ()
   assert.match(workLogApp, /async function selectView\(nextView: View\)[\s\S]*await saveBeforeAction/);
   assert.match(workLogApp, /async function selectFilter\(nextFilter: string\)[\s\S]*await saveBeforeAction/);
   assert.match(workLogApp, /if \(profile\?\.role !== "직원" \|\| !canEdit\) return;/);
-  assert.match(workLogApp, /const nextWeekData = updater\(weekDataRef\.current\)/);
+  assert.match(workLogApp, /const nextWeekData = sanitizeWeekData\(updater\(weekDataRef\.current\)\)/);
   assert.match(workLogApp, /draftSnapshotRef\.current = \{[\s\S]*data: nextWeekData,[\s\S]*version: draftVersionRef\.current/);
-  assert.match(workLogApp, /const version = draftVersionRef\.current;[\s\S]*data: weekDataRef\.current/);
+  assert.match(workLogApp, /const version = draftVersionRef\.current;[\s\S]*data: sanitizeWeekData\(weekDataRef\.current\)/);
 
   assert.match(migration, /create trigger enforce_admin_work_log_status_only/);
   assert.match(migration, /create policy work_logs_insert_authenticated/);
@@ -138,6 +138,25 @@ test("halves only the daily work progress column", async () => {
   assert.match(styles, /\.table-head, \.task-row \{ display: grid; grid-template-columns: minmax\(0, 1fr\) 110px 28px; \}/);
   assert.match(styles, /\.day-card \.table-head, \.day-card \.task-row \{ grid-template-columns: minmax\(0, 1fr\) 55px 28px; \}/);
   assert.match(styles, /\.day-card \.table-head, \.day-card \.task-row \{ grid-template-columns: minmax\(0, 1fr\) 36px 25px; \}/);
+});
+
+test("keeps display-only guidance out of saved and submitted work logs", async () => {
+  const [workLogApp, pdfGenerator] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/approval-email/work-log-pdf.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workLogApp, /const DISPLAY_ONLY_TEXT = new Set\([\s\S]*"업무 내용을 입력하세요"[\s\S]*"특근 업무 내용"/);
+  assert.match(workLogApp, /function sanitizeWeekData\(data: WeekData\)/);
+  assert.match(workLogApp, /function blankSpecial\(\): SpecialTask \{[\s\S]*"소요 시간": ""/);
+  assert.match(workLogApp, /data: sanitizeWeekData\(weekDataRef\.current\)/);
+  assert.match(workLogApp, /data: sanitizeWeekData\(snapshot\.data\)/);
+  assert.match(workLogApp, /const dataWithTimes = sanitizeWeekData\(/);
+  assert.match(workLogApp, /data: log\.data \? normalizeData\(log\.week, log\.data\) : null/);
+  assert.match(workLogApp, /placeholder=\{disabled \? undefined : "업무 내용을 입력하세요"\}/);
+  assert.match(workLogApp, /placeholder=\{canEdit \? "이번 주 공유할 내용이나 특이사항을 입력하세요" : undefined\}/);
+  assert.match(pdfGenerator, /const DISPLAY_ONLY_TEXT = new Set\([\s\S]*"업무 내용을 입력하세요"/);
+  assert.match(pdfGenerator, /return text && !DISPLAY_ONLY_TEXT\.has\(text\) \? text : fallback/);
 });
 
 test("generates Korean PDFs with a subsetted Nanum Gothic font", async () => {
