@@ -7,7 +7,7 @@ import { createZip, type ZipEntry } from "./lib/zip";
 
 type Role = "직원" | "관리자";
 type View = "journal" | "leave" | "special";
-type AuthMode = "login" | "signup";
+type AuthMode = "login" | "signup" | "recovery";
 type AuthFeedbackTone = "error" | "success";
 type AuthFeedback = { tone: AuthFeedbackTone; message: string } | null;
 
@@ -1363,10 +1363,16 @@ function AuthScreen({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (mode === "signup" && password !== confirm) return showFeedback("비밀번호가 일치하지 않습니다.", "error");
-    if (password.length < 6) return showFeedback("비밀번호는 6자 이상이어야 합니다.", "error");
+    if (mode !== "recovery" && password.length < 6) return showFeedback("비밀번호는 6자 이상이어야 합니다.", "error");
     setFeedback(null);
     setSubmitting(true);
-    if (mode === "login") {
+    if (mode === "recovery") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/update-password`,
+      });
+      if (error) showFeedback(error.message, "error");
+      else showFeedback("계정이 존재하면 비밀번호 재설정 링크를 보냈습니다. 메일함과 스팸함을 확인해 주세요.", "success");
+    } else if (mode === "login") {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         const errorText = error.message.toLowerCase();
@@ -1385,7 +1391,7 @@ function AuthScreen({
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { name }, emailRedirectTo: window.location.origin },
+        options: { data: { name }, emailRedirectTo: `${window.location.origin}/auth/confirm` },
       });
       if (error) showFeedback(error.message, "error");
       else if (!data.session) showFeedback("가입 확인 메일을 보냈습니다. 메일의 링크를 누른 후 로그인하세요. 혹시 메일이 보이지 않으면 메일 스팸함과 입력하신 메일 주소를 다시 확인해주세요.", "success");
@@ -1405,15 +1411,17 @@ function AuthScreen({
       </section>
       <section className="auth-panel">
         <div className="auth-card">
-          <div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setFeedback(null); }}>로그인</button><button className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setFeedback(null); }}>회원가입</button></div>
-          <div className="auth-heading"><h2>{mode === "login" ? "다시 만나 반갑습니다" : "업무일지 시작하기"}</h2><p>{mode === "login" ? "등록된 계정으로 로그인하세요." : "실명과 이메일로 새 계정을 만드세요. Gmail 또는 네이버 메일 사용을 권장합니다."}</p></div>
+          <div className="auth-tabs"><button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setFeedback(null); }}>로그인</button><button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setFeedback(null); }}>회원가입</button></div>
+          <div className="auth-heading"><h2>{mode === "login" ? "다시 만나 반갑습니다" : mode === "signup" ? "업무일지 시작하기" : "비밀번호 재설정"}</h2><p>{mode === "login" ? "등록된 계정으로 로그인하세요." : mode === "signup" ? "실명과 이메일로 새 계정을 만드세요. Gmail 또는 네이버 메일 사용을 권장합니다." : "등록한 이메일로 비밀번호 재설정 링크를 보내드립니다."}</p></div>
           <form onSubmit={submit}>
             {mode === "signup" && <label>이름<input required value={name} onChange={(event) => { setName(event.target.value); setFeedback(null); }} placeholder="실명 입력" /></label>}
             <label>이메일<input type="email" required value={email} onChange={(event) => { setEmail(event.target.value); setFeedback(null); }} placeholder="email@company.com" /></label>
-            <label>비밀번호<input type="password" required value={password} onChange={(event) => { setPassword(event.target.value); setFeedback(null); }} placeholder="6자 이상" /></label>
+            {mode !== "recovery" && <label>비밀번호<input type="password" required value={password} onChange={(event) => { setPassword(event.target.value); setFeedback(null); }} placeholder="6자 이상" /></label>}
             {mode === "signup" && <label>비밀번호 확인<input type="password" required value={confirm} onChange={(event) => { setConfirm(event.target.value); setFeedback(null); }} placeholder="비밀번호 다시 입력" /></label>}
+            {mode === "login" && <button type="button" className="auth-link-button" onClick={() => { setMode("recovery"); setFeedback(null); }}>비밀번호를 잊으셨나요?</button>}
+            {mode === "recovery" && <button type="button" className="auth-link-button" onClick={() => { setMode("login"); setFeedback(null); }}>로그인으로 돌아가기</button>}
             {feedback && <div className={`auth-feedback ${feedback.tone}`} role={feedback.tone === "error" ? "alert" : "status"}>{feedback.message}</div>}
-            <button className="button primary auth-submit" disabled={submitting || busy}>{submitting ? "처리 중…" : mode === "login" ? "로그인" : "가입하기"}</button>
+            <button className="button primary auth-submit" disabled={submitting || busy}>{submitting ? "처리 중…" : mode === "login" ? "로그인" : mode === "signup" ? "가입하기" : "재설정 메일 보내기"}</button>
           </form>
           <small className="auth-footnote">계정 및 업무 데이터는 기존 Supabase 프로젝트와 동일하게 연결됩니다.</small>
         </div>
