@@ -298,9 +298,10 @@ function durationMinutes(value: string) {
 type WorkLogAppProps = {
   supabaseUrl: string;
   supabasePublishableKey: string;
+  siteUrl: string;
 };
 
-export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: WorkLogAppProps) {
+export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUrl }: WorkLogAppProps) {
   const supabase = useMemo(
     () => createSupabaseBrowserClient(supabaseUrl, supabasePublishableKey),
     [supabasePublishableKey, supabaseUrl],
@@ -1042,7 +1043,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey }: Work
     if (error) flash(`연차 일수를 저장하지 못했습니다: ${error.message}`);
   }
 
-  if (!session) return <AuthScreen busy={busy} supabase={supabase} />;
+  if (!session) return <AuthScreen busy={busy} siteUrl={siteUrl} supabase={supabase} />;
   if (!profile || !currentUser) return <LoadingScreen message="사용자 정보를 불러오는 중입니다" />;
 
   const leaveRows = historyLogs.flatMap((log) => (log.data?.attendance ?? [])
@@ -1343,9 +1344,11 @@ function BulkApprovalOverlay({ progress }: { progress: BulkApprovalProgress }) {
 
 function AuthScreen({
   busy,
+  siteUrl,
   supabase,
 }: {
   busy: boolean;
+  siteUrl: string;
   supabase: ReturnType<typeof createSupabaseBrowserClient>;
 }) {
   const [mode, setMode] = useState<AuthMode>("login");
@@ -1368,7 +1371,7 @@ function AuthScreen({
     setSubmitting(true);
     if (mode === "recovery") {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/update-password`,
+        redirectTo: `${siteUrl}/auth/update-password`,
       });
       if (error) showFeedback(error.message, "error");
       else showFeedback("계정이 존재하면 비밀번호 재설정 링크를 보냈습니다. 메일함과 스팸함을 확인해 주세요.", "success");
@@ -1391,7 +1394,7 @@ function AuthScreen({
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { name }, emailRedirectTo: `${window.location.origin}/auth/confirm` },
+        options: { data: { name }, emailRedirectTo: `${siteUrl}/auth/confirm` },
       });
       if (error) showFeedback(error.message, "error");
       else if (!data.session) showFeedback("가입 확인 메일을 보냈습니다. 메일의 링크를 누른 후 로그인하세요. 혹시 메일이 보이지 않으면 메일 스팸함과 입력하신 메일 주소를 다시 확인해주세요.", "success");

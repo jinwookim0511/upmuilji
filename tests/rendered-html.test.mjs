@@ -88,17 +88,22 @@ test("recommends Gmail or Naver Mail when creating an account", async () => {
 });
 
 test("provides Supabase email confirmation and password recovery flows", async () => {
-  const [workLogApp, callbackPage, confirmPage, updatePasswordPage, legacyConfirmPage, legacyUpdatePasswordPage] = await Promise.all([
+  const [homePage, workLogApp, callbackPage, confirmPage, updatePasswordPage, malformedLegacyUpdatePasswordPage, legacyConfirmPage, legacyUpdatePasswordPage] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/AuthCallbackPage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/confirm/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/update-password/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/update-passwordupdate-password.html/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/confirm-signup.html/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/update-password.html/page.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(workLogApp, /supabase\.auth\.resetPasswordForEmail\(email, \{[\s\S]*redirectTo: `\$\{window\.location\.origin\}\/auth\/update-password`/);
-  assert.match(workLogApp, /emailRedirectTo: `\$\{window\.location\.origin\}\/auth\/confirm`/);
+  assert.match(homePage, /process\.env\.SITE_URL[\s\S]*process\.env\.NEXT_PUBLIC_SITE_URL[\s\S]*https:\/\/smartmecworklog\.vercel\.app/);
+  assert.match(homePage, /siteUrl=\{siteUrl\}/);
+  assert.match(workLogApp, /supabase\.auth\.resetPasswordForEmail\(email, \{[\s\S]*redirectTo: `\$\{siteUrl\}\/auth\/update-password`/);
+  assert.match(workLogApp, /emailRedirectTo: `\$\{siteUrl\}\/auth\/confirm`/);
+  assert.doesNotMatch(workLogApp, /window\.location\.origin.*auth\/(?:update-password|confirm)/);
   assert.match(workLogApp, /비밀번호를 잊으셨나요\?/);
   assert.match(callbackPage, /supabase\.auth\.exchangeCodeForSession\(code\)/);
   assert.match(callbackPage, /event === "PASSWORD_RECOVERY"/);
@@ -106,6 +111,7 @@ test("provides Supabase email confirmation and password recovery flows", async (
   assert.match(callbackPage, /const \[formError, setFormError\] = useState\(""\)/);
   assert.match(confirmPage, /kind="confirm"/);
   assert.match(updatePasswordPage, /kind="recovery"/);
+  assert.match(malformedLegacyUpdatePasswordPage, /kind="recovery"/);
   assert.match(legacyConfirmPage, /kind="confirm"/);
   assert.match(legacyUpdatePasswordPage, /kind="recovery"/);
 });
