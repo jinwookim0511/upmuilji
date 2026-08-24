@@ -87,6 +87,25 @@ test("recommends Gmail or Naver Mail when creating an account", async () => {
   assert.match(workLogApp, /실명과 이메일로 새 계정을 만드세요\. Gmail 또는 네이버 메일 사용을 권장합니다\./);
 });
 
+test("provides Supabase email confirmation and password recovery flows", async () => {
+  const [workLogApp, callbackPage, confirmPage, updatePasswordPage] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/AuthCallbackPage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/confirm/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/update-password/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workLogApp, /supabase\.auth\.resetPasswordForEmail\(email, \{[\s\S]*redirectTo: `\$\{window\.location\.origin\}\/auth\/update-password`/);
+  assert.match(workLogApp, /emailRedirectTo: `\$\{window\.location\.origin\}\/auth\/confirm`/);
+  assert.match(workLogApp, /비밀번호를 잊으셨나요\?/);
+  assert.match(callbackPage, /supabase\.auth\.exchangeCodeForSession\(code\)/);
+  assert.match(callbackPage, /event === "PASSWORD_RECOVERY"/);
+  assert.match(callbackPage, /supabase\.auth\.updateUser\(\{ password \}\)/);
+  assert.match(callbackPage, /const \[formError, setFormError\] = useState\(""\)/);
+  assert.match(confirmPage, /kind="confirm"/);
+  assert.match(updatePasswordPage, /kind="recovery"/);
+});
+
 test("autosaves employee drafts only on app controls and browser exit", async () => {
   const [workLogApp, migration] = await Promise.all([
     readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
