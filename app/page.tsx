@@ -11,6 +11,11 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   const supabaseUrl = process.env.SUPABASE_URL?.trim() ?? "";
   const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY?.trim() ?? "";
+  const siteUrl = (
+    process.env.SITE_URL?.trim()
+    || process.env.NEXT_PUBLIC_SITE_URL?.trim()
+    || "https://smartmecworklog.vercel.app"
+  ).replace(/\/+$/, "");
 
   if (!supabaseUrl || !supabasePublishableKey) {
     return (
@@ -25,6 +30,7 @@ export default function Home() {
     <WorkLogApp
       supabaseUrl={supabaseUrl}
       supabasePublishableKey={supabasePublishableKey}
+      siteUrl={siteUrl}
     />
   );
 }
