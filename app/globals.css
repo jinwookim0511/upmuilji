@@ -87,6 +87,10 @@ input, select, textarea { color: var(--ink); }
 .topbar h1 { margin: 0; font-family: Georgia, "Malgun Gothic", serif; font-size: clamp(25px, 2.6vw, 36px); letter-spacing: -.045em; }
 .top-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
+.basis-switch { display: inline-flex; padding: 3px; background: #e4e9e5; border: 1px solid #d5ddd7; border-radius: 10px; }
+.basis-switch button { min-height: 32px; padding: 0 13px; color: #6a776f; background: transparent; border: 0; border-radius: 7px; font-size: 11px; font-weight: 800; }
+.basis-switch button.active { color: white; background: var(--green); box-shadow: 0 3px 10px rgba(21,74,56,.18); }
+
 .button { min-height: 36px; padding: 0 14px; border: 1px solid transparent; border-radius: 8px; font-size: 12px; font-weight: 750; transition: transform .15s ease, background .15s ease; }
 .button:hover { transform: translateY(-1px); }
 .button.primary { color: white; background: var(--green); }
@@ -176,6 +180,14 @@ input, select, textarea { color: var(--ink); }
   .days-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
 
+.leave-view-stack, .all-leave-view { max-width: 1080px; margin: 0 auto; }
+.leave-view-stack { display: grid; gap: 14px; }
+.hire-date-editor { display: grid; grid-template-columns: minmax(210px, 1fr) 180px 180px auto; gap: 14px; align-items: end; padding: 18px 20px; background: var(--paper); border: 1px solid #dce3de; border-radius: 8px; box-shadow: 0 10px 28px rgba(37,55,44,.05); }
+.hire-date-editor p, .all-leave-summary p { margin: 0 0 6px; color: var(--green); font-size: 9px; font-weight: 900; letter-spacing: .14em; }
+.hire-date-editor strong { display: block; font-size: 15px; }
+.hire-date-editor span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.hire-date-editor label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 800; }
+.hire-date-editor input { height: 36px; padding: 0 9px; background: white; border: 1px solid #ccd6cf; border-radius: 7px; font-size: 11px; }
 .history-view { max-width: 1080px; margin: 0 auto; }
 .history-summary { min-height: 190px; display: flex; justify-content: space-between; align-items: center; padding: 28px 38px; color: white; background: var(--green-dark); border-radius: 5px 5px 0 0; overflow: hidden; }
 .history-summary p { margin: 0 0 12px; color: #a8c9b9; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
@@ -190,6 +202,20 @@ input, select, textarea { color: var(--ink); }
 .empty-state { padding: 70px 20px; text-align: center; }
 .empty-state strong { font-family: Georgia, "Malgun Gothic", serif; font-size: 21px; }
 .empty-state p { color: var(--muted); font-size: 12px; }
+
+.all-leave-view { display: grid; gap: 14px; }
+.all-leave-summary { min-height: 170px; display: flex; justify-content: space-between; align-items: center; padding: 28px 38px; color: white; background: linear-gradient(135deg, #154a38, #245f49); border-radius: 7px; overflow: hidden; }
+.all-leave-summary p { color: #a8c9b9; }
+.all-leave-summary strong { display: block; font-family: Georgia, "Malgun Gothic", serif; font-size: clamp(32px, 5vw, 52px); }
+.all-leave-summary span { display: block; margin-top: 10px; color: #c5d8ce; font-size: 12px; }
+.employee-leave-table { overflow: hidden; background: var(--paper); border: 1px solid #dfe4df; border-radius: 7px; box-shadow: 0 12px 35px rgba(37,55,44,.06); }
+.employee-leave-head, .employee-leave-row { display: grid; grid-template-columns: minmax(190px, 1.5fr) 1fr .7fr .7fr .7fr; gap: 12px; align-items: center; min-height: 48px; padding: 0 22px; }
+.employee-leave-head { color: var(--muted); background: #ecefe9; border-bottom: 1px solid #d6ddd8; font-size: 10px; font-weight: 800; }
+.employee-leave-row { border-bottom: 1px solid var(--line); font-size: 11px; }
+.employee-leave-row:last-child { border-bottom: 0; }
+.employee-leave-row strong, .employee-leave-row small { display: block; }
+.employee-leave-row small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.employee-leave-row .negative { color: var(--red); font-weight: 850; }
 
 .auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(380px, 1.05fr) minmax(440px, .95fr); background: #eef1ea; }
 .auth-intro { position: relative; display: flex; flex-direction: column; justify-content: center; padding: 9vw; color: white; background: var(--green-dark); overflow: hidden; }
@@ -269,6 +295,8 @@ input, select, textarea { color: var(--ink); }
   .days-grid { grid-template-columns: 1fr; }
   .special-table { overflow-x: auto; }
   .special-head, .special-row { min-width: 880px; }
+  .hire-date-editor { grid-template-columns: 1fr 1fr; }
+  .hire-date-editor > div { grid-column: 1 / -1; }
 }
 
 @media (max-width: 760px) {
@@ -276,7 +304,7 @@ input, select, textarea { color: var(--ink); }
   .sidebar { position: static; width: 100%; min-height: auto; padding: 15px; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
   .brand { margin: 0; }
   .profile-card, .field-label, .compact-settings, .sidebar-spacer { display: none; }
-  .side-nav { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); }
+  .side-nav { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
   .side-nav button { justify-content: center; padding: 9px 5px; font-size: 10px; }
   .side-nav button span { display: none; }
   .side-actions { grid-column: 1 / -1; display: flex; margin: 0; padding: 0; border: 0; }
@@ -309,6 +337,12 @@ input, select, textarea { color: var(--ink); }
   .summary-art { width: 80px; height: 80px; font-size: 36px; }
   .history-table { overflow-x: auto; }
   .history-head, .history-row { min-width: 720px; }
+  .topbar { align-items: stretch; flex-direction: column; gap: 10px; padding-bottom: 14px; }
+  .basis-switch { align-self: flex-start; }
+  .hire-date-editor { grid-template-columns: 1fr; }
+  .hire-date-editor > div { grid-column: auto; }
+  .employee-leave-table { overflow-x: auto; }
+  .employee-leave-head, .employee-leave-row { min-width: 700px; }
   .auth-page { grid-template-columns: 1fr; }
   .auth-intro { min-height: 280px; padding: 45px 28px; }
   .intro-mark { width: 42px; height: 42px; margin-bottom: 20px; }

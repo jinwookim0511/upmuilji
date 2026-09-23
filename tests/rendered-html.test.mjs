@@ -213,3 +213,23 @@ test("generates Korean PDFs with a subsetted Nanum Gothic font", async () => {
   assert.match(pdfGenerator, /creates a subset and adds only glyphs used/);
   assert.doesNotMatch(pdfGenerator, /subset:\s*false|NanumGothicCoding/);
 });
+
+test("provides admin-managed hire dates and organization-wide leave reporting", async () => {
+  const [workLogApp, migration] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260923065253_add_employee_hire_dates.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workLogApp, /hire_date: string \| null/);
+  assert.match(workLogApp, /administrative_hire_date: string \| null/);
+  assert.match(workLogApp, /profile\.role === "관리자" && <button className=\{view === "leave-all"[\s\S]*?selectView\("leave-all"\)/);
+  assert.match(workLogApp, /function LeaveBasisSwitch/);
+  assert.match(workLogApp, /function HireDateEditor/);
+  assert.match(workLogApp, /function AllLeaveView/);
+  assert.match(workLogApp, /!\["-", "공휴일"\]\.includes\(item\.leave_type\)/);
+  assert.doesNotMatch(workLogApp, /leave_entitlements|changeLeaveTotal/);
+  assert.match(migration, /add column if not exists hire_date date/);
+  assert.match(migration, /add column if not exists administrative_hire_date date/);
+  assert.match(migration, /create policy user_roles_update_hire_dates_admin/);
+  assert.match(migration, /grant update \(hire_date, administrative_hire_date\)/);
+});
