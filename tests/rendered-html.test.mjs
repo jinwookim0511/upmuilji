@@ -222,11 +222,11 @@ test("provides admin-managed hire dates and organization-wide leave reporting", 
 
   assert.match(workLogApp, /hire_date: string \| null/);
   assert.match(workLogApp, /administrative_hire_date: string \| null/);
-  assert.match(workLogApp, /profile\.role === "관리자" && <button className=\{`admin-overview-button[\s\S]*?selectView\("leave-all"\)/);
+  assert.match(workLogApp, /profile\.role === "관리자" && \([\s\S]*?admin-overview-button[\s\S]*?selectView\("leave-all"\)/);
   assert.match(workLogApp, /function LeaveBasisSwitch/);
   assert.match(workLogApp, /function HireDateEditor/);
   assert.match(workLogApp, /function AllLeaveView/);
-  assert.match(workLogApp, /<AllLeaveView users=\{users\} logs=\{allHistoryLogs\} basis=\{leaveBasis\} onSave=\{saveHireDates\}/);
+  assert.match(workLogApp, /<AllLeaveView users=\{activeUsers\} logs=\{allHistoryLogs\} basis=\{leaveBasis\} onSave=\{saveHireDates\}/);
   assert.match(workLogApp, /function CompactEmployeeLeaveRow/);
   assert.match(workLogApp, /className="compact-leave-table"/);
   assert.match(workLogApp, /className="compact-leave-details"/);
@@ -246,12 +246,15 @@ test("places the compact organization leave shortcut above employee selection", 
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
   const overviewButton = workLogApp.indexOf("admin-overview-button");
+  const retirementButton = workLogApp.indexOf("직원 퇴사 여부 관리");
   const employeeSelection = workLogApp.indexOf('<label className="field-label">직원 선택');
 
-  assert.ok(overviewButton >= 0 && overviewButton < employeeSelection);
-  assert.equal(workLogApp.match(/admin-overview-button/g)?.length, 1);
+  assert.ok(overviewButton >= 0 && overviewButton < retirementButton && retirementButton < employeeSelection);
+  assert.equal(workLogApp.match(/admin-overview-button/g)?.length, 2);
   assert.match(styles, /\.all-leave-summary\.compact \{ min-height: 58px/);
   assert.match(styles, /\.compact-leave-row \{ min-height: 39px/);
+  assert.match(styles, /\.all-leave-view \{ width: min\(720px, 100%\)/);
+  assert.match(styles, /grid-template-columns: 155px 112px 112px 48px 50px 50px 50px 50px/);
 });
 
 test("keeps the organization leave view compact while enlarging its text and placing save beside hire dates", async () => {
@@ -266,4 +269,25 @@ test("keeps the organization leave view compact while enlarging its text and pla
   assert.match(styles, /\.leave-all-topbar \{ min-height: 48px; justify-content: flex-end; \}/);
   assert.match(styles, /\.compact-leave-head \{[^\n]*font-size: 9px/);
   assert.match(styles, /\.compact-leave-row \{[^\n]*font-size: 10px/);
+});
+
+test("lets admins mark retired employees and hides them from active employee views", async () => {
+  const [workLogApp, migration, styles] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260923090150_add_employee_retirement_status.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workLogApp, /is_retired: boolean/);
+  assert.match(workLogApp, /const activeUsers = useMemo\(\(\) => users\.filter\(\(user\) => !user\.is_retired\)/);
+  assert.match(workLogApp, /selectView\("employee-status"\)/);
+  assert.match(workLogApp, /function EmployeeStatusView/);
+  assert.match(workLogApp, /activeUsers\.map\(\(user\) => <option/);
+  assert.match(workLogApp, /<AllLeaveView users=\{activeUsers\}/);
+  assert.match(workLogApp, /update\(\{ is_retired: isRetired \}\)/);
+  assert.match(styles, /\.employee-status-view/);
+  assert.match(migration, /add column if not exists is_retired boolean not null default false/);
+  assert.match(migration, /grant select \(is_retired\)/);
+  assert.match(migration, /grant update \(is_retired\)/);
+  assert.match(migration, /create policy user_roles_update_employee_admin/);
 });

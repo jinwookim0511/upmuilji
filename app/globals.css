@@ -63,7 +63,8 @@ input, select, textarea { color: var(--ink); }
 .field-label { margin-bottom: 18px; }
 .field-label select, .compact-settings select { width: 100%; color: white; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; padding: 9px 10px; }
 .field-label option, .compact-settings option { color: var(--ink); }
-.admin-overview-button { width: 100%; display: flex; align-items: center; gap: 10px; margin: 0 0 9px; padding: 10px 11px; color: #dce9e2; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); border-radius: 9px; text-align: left; font-size: 11px; font-weight: 800; }
+.admin-tool-menu { display: grid; gap: 6px; margin-bottom: 14px; }
+.admin-overview-button { width: 100%; display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 11px; color: #dce9e2; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); border-radius: 9px; text-align: left; font-size: 11px; font-weight: 800; }
 .admin-overview-button:hover { background: rgba(255,255,255,.12); }
 .admin-overview-button.active { color: #173c2e; background: #d9e9df; border-color: #d9e9df; }
 .admin-overview-button span { width: 20px; text-align: center; font-size: 15px; }
@@ -186,7 +187,7 @@ input, select, textarea { color: var(--ink); }
   .days-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
 
-.leave-view-stack, .all-leave-view { max-width: 1080px; margin: 0 auto; }
+.leave-view-stack { max-width: 1080px; margin: 0 auto; }
 .leave-view-stack { display: grid; gap: 14px; }
 .hire-date-editor { display: grid; grid-template-columns: minmax(210px, 1fr) 180px 180px auto; gap: 14px; align-items: end; padding: 18px 20px; background: var(--paper); border: 1px solid #dce3de; border-radius: 8px; box-shadow: 0 10px 28px rgba(37,55,44,.05); }
 .hire-date-editor p, .all-leave-summary p { margin: 0 0 6px; color: var(--green); font-size: 9px; font-weight: 900; letter-spacing: .14em; }
@@ -209,7 +210,7 @@ input, select, textarea { color: var(--ink); }
 .empty-state strong { font-family: Georgia, "Malgun Gothic", serif; font-size: 21px; }
 .empty-state p { color: var(--muted); font-size: 12px; }
 
-.all-leave-view { display: grid; gap: 14px; }
+.all-leave-view { width: min(720px, 100%); display: grid; gap: 10px; margin: 0 auto; }
 .all-leave-summary { min-height: 170px; display: flex; justify-content: space-between; align-items: center; padding: 28px 38px; color: white; background: linear-gradient(135deg, #154a38, #245f49); border-radius: 7px; overflow: hidden; }
 .all-leave-summary p { color: #a8c9b9; }
 .all-leave-summary strong { display: block; font-family: Georgia, "Malgun Gothic", serif; font-size: clamp(32px, 5vw, 52px); }
@@ -221,7 +222,7 @@ input, select, textarea { color: var(--ink); }
 .all-leave-stats span { min-width: 66px; padding: 6px 9px; color: #dce9e2 !important; background: rgba(255,255,255,.08); border-radius: 5px; text-align: center; }
 .all-leave-stats b { color: white; font-size: 13px; }
 .compact-leave-table { overflow-x: auto; background: var(--paper); border: 1px solid #d9e1db; border-radius: 6px; box-shadow: 0 8px 24px rgba(37,55,44,.05); }
-.compact-leave-head, .compact-leave-row { min-width: 900px; display: grid; grid-template-columns: minmax(145px, 1.35fr) 120px 120px 50px 54px 54px 54px 54px; gap: 6px; align-items: center; padding: 0 10px; }
+.compact-leave-head, .compact-leave-row { min-width: 700px; display: grid; grid-template-columns: 155px 112px 112px 48px 50px 50px 50px 50px; gap: 6px; align-items: center; padding: 0 10px; }
 .compact-leave-head { min-height: 29px; color: var(--muted); background: #e9ede9; border-bottom: 1px solid #d2dad4; font-size: 9px; font-weight: 850; }
 .compact-leave-row { min-height: 39px; border-bottom: 1px solid var(--line); font-size: 10px; }
 .compact-leave-row:last-child { border-bottom: 0; }
@@ -243,6 +244,28 @@ input, select, textarea { color: var(--ink); }
 .compact-history-head { color: var(--muted); background: #f0f3ef; border-block: 1px solid #dce2dd; font-size: 8px; font-weight: 850; }
 .compact-history-row { border-bottom: 1px solid #e5e9e6; font-size: 9px; }
 .compact-history-empty { padding: 13px; color: var(--muted); font-size: 9px; text-align: center; }
+
+.employee-status-view { max-width: 780px; margin: 0 auto 30px; }
+.employee-status-summary { min-height: 92px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px; color: white; background: var(--green-dark); border-radius: 8px 8px 0 0; }
+.employee-status-summary p { margin: 0 0 5px; color: #a8c9b9; font-size: 9px; font-weight: 900; letter-spacing: .14em; }
+.employee-status-summary strong { display: block; font-size: 18px; }
+.employee-status-summary span { display: block; margin-top: 4px; color: #c5d8ce; font-size: 10px; }
+.employee-status-counts { display: flex; gap: 6px; flex: 0 0 auto; }
+.employee-status-counts span { min-width: 76px; margin: 0; padding: 9px 10px; background: rgba(255,255,255,.08); border-radius: 6px; text-align: center; }
+.employee-status-counts b { color: white; font-size: 14px; }
+.employee-status-table { overflow-x: auto; background: var(--paper); border: 1px solid #d9e1db; border-top: 0; border-radius: 0 0 8px 8px; box-shadow: 0 10px 30px rgba(37,55,44,.06); }
+.employee-status-head, .employee-status-row { min-width: 650px; display: grid; grid-template-columns: 150px minmax(220px, 1fr) 80px 130px; gap: 10px; align-items: center; padding: 0 18px; }
+.employee-status-head { min-height: 34px; color: var(--muted); background: #e9ede9; border-bottom: 1px solid #d2dad4; font-size: 9px; font-weight: 850; }
+.employee-status-row { min-height: 48px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.employee-status-row:last-child { border-bottom: 0; }
+.employee-status-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.employment-state { width: fit-content; padding: 4px 9px; border-radius: 999px; font-size: 9px; font-weight: 850; }
+.employment-state.active { color: #176042; background: #e6f4eb; }
+.employment-state.retired { color: #8b4b31; background: #f6e9e3; }
+.retirement-check { display: flex; align-items: center; gap: 7px; color: #526057; font-size: 10px; font-weight: 800; cursor: pointer; }
+.retirement-check input { width: 16px; height: 16px; accent-color: var(--green); }
+.retirement-check input:disabled { cursor: wait; }
+.employee-status-empty { padding: 35px 18px; color: var(--muted); font-size: 11px; text-align: center; }
 
 .auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(380px, 1.05fr) minmax(440px, .95fr); background: #eef1ea; }
 .auth-intro { position: relative; display: flex; flex-direction: column; justify-content: center; padding: 9vw; color: white; background: var(--green-dark); overflow: hidden; }
@@ -331,7 +354,8 @@ input, select, textarea { color: var(--ink); }
   .sidebar { position: static; width: 100%; min-height: auto; padding: 15px; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
   .brand { margin: 0; }
   .profile-card, .field-label, .compact-settings, .sidebar-spacer { display: none; }
-  .admin-overview-button { grid-column: 1 / -1; margin: 0; justify-content: center; }
+  .admin-tool-menu { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+  .admin-overview-button { justify-content: center; }
   .side-nav { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
   .side-nav button { justify-content: center; padding: 9px 5px; font-size: 10px; }
   .side-nav button span { display: none; }
@@ -372,6 +396,9 @@ input, select, textarea { color: var(--ink); }
   .all-leave-summary.compact { align-items: flex-start; flex-direction: column; gap: 7px; }
   .all-leave-stats { width: 100%; }
   .all-leave-stats span { flex: 1; }
+  .employee-status-summary { align-items: flex-start; flex-direction: column; }
+  .employee-status-counts { width: 100%; }
+  .employee-status-counts span { flex: 1; }
   .auth-page { grid-template-columns: 1fr; }
   .auth-intro { min-height: 280px; padding: 45px 28px; }
   .intro-mark { width: 42px; height: 42px; margin-bottom: 20px; }

@@ -7,7 +7,7 @@ import { accruedAnnualLeave, leaveDaysForType, parseLocalDate } from "./lib/leav
 import { createZip, type ZipEntry } from "./lib/zip";
 
 type Role = "직원" | "관리자";
-type View = "journal" | "leave" | "leave-all" | "special";
+type View = "journal" | "leave" | "leave-all" | "employee-status" | "special";
 type LeaveBasis = "actual" | "administrative";
 type AuthMode = "login" | "signup" | "recovery";
 type AuthFeedbackTone = "error" | "success";
@@ -20,6 +20,7 @@ type RoleRow = {
   email: string;
   hire_date: string | null;
   administrative_hire_date: string | null;
+  is_retired: boolean;
 };
 
 type Task = {
@@ -359,11 +360,13 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
   const sessionUserId = session?.user.id ?? null;
   const sessionUserEmail = session?.user.email ?? "";
 
+  const activeUsers = useMemo(() => users.filter((user) => !user.is_retired), [users]);
+
   const currentUser = useMemo(() => {
     if (!profile) return null;
     if (profile.role !== "관리자") return profile;
-    return users.find((user) => user.email === selectedEmail) ?? profile;
-  }, [profile, selectedEmail, users]);
+    return activeUsers.find((user) => user.email === selectedEmail) ?? profile;
+  }, [activeUsers, profile, selectedEmail]);
 
   const subRole = useMemo(() => {
     const name = profile?.name ?? "";
@@ -464,7 +467,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
       setBusy(true);
       const { data, error } = await supabase
         .from("user_roles")
-        .select("id, role, name, email, hire_date, administrative_hire_date")
+        .select("id, role, name, email, hire_date, administrative_hire_date, is_retired")
         .eq("id", sessionUserId)
         .maybeSingle();
       if (!active) return;
@@ -476,6 +479,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
         role: "직원",
         hire_date: null,
         administrative_hire_date: null,
+        is_retired: false,
       };
       setProfile(nextProfile);
       if (restoredWeekUserRef.current !== nextProfile.id) {
@@ -484,14 +488,15 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
       }
 
       if (nextProfile.role === "관리자") {
-        const { data: staff } = await supabase.from("user_roles").select("id, role, name, email, hire_date, administrative_hire_date");
+        const { data: staff } = await supabase.from("user_roles").select("id, role, name, email, hire_date, administrative_hire_date, is_retired");
         const staffRows = ((staff ?? []) as RoleRow[])
           .filter((item) => item.role !== "관리자")
           .sort((left, right) => KOREAN_COLLATOR.compare(employeeSortName(left), employeeSortName(right)) || left.email.localeCompare(right.email));
+        const activeStaffRows = staffRows.filter((item) => !item.is_retired);
         const previousEmail = savedEmployeeSelection(nextProfile.id);
-        const initialEmail = staffRows.some((item) => item.email === previousEmail)
+        const initialEmail = activeStaffRows.some((item) => item.email === previousEmail)
           ? previousEmail!
-          : staffRows[0]?.email ?? nextProfile.email;
+          : activeStaffRows[0]?.email ?? nextProfile.email;
         setUsers(staffRows);
         setSelectedEmail(initialEmail);
       } else {
@@ -578,7 +583,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
   }, [loadLog, loadStatusMap, selectedEmail, selectedWeek]);
 
   useEffect(() => {
-    if (!selectedEmail || view === "journal" || view === "leave-all") return;
+    if (!selectedEmail || !["leave", "special"].includes(view)) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadHistory(selectedEmail);
   }, [loadHistory, selectedEmail, view]);
@@ -860,10 +865,10 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
 
   async function selectView(nextView: View) {
     if (nextView === view) return;
-    if (nextView === "leave-all" && profile?.role !== "관리자") return;
+    if (["leave-all", "employee-status"].includes(nextView) && profile?.role !== "관리자") return;
     await saveBeforeAction(async () => {
       setView(nextView);
-      if (nextView !== "journal") await loadHistory(selectedEmail);
+      if (["leave", "special"].includes(nextView)) await loadHistory(selectedEmail);
       if (nextView === "leave-all") await loadAllHistory();
     });
   }
@@ -1082,6 +1087,26 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
     return true;
   }
 
+  async function saveRetirementStatus(userId: string, isRetired: boolean) {
+    if (profile?.role !== "관리자") return false;
+    const target = users.find((user) => user.id === userId);
+    if (!target) return false;
+    const { data: updated, error } = await supabase.from("user_roles").update({ is_retired: isRetired }).eq("id", userId).select("id").maybeSingle();
+    if (error || !updated) {
+      flash(`퇴사 여부를 저장하지 못했습니다${error ? `: ${error.message}` : ". 관리자 권한을 확인해 주세요."}`);
+      return false;
+    }
+    setUsers((current) => current.map((user) => user.id === userId ? { ...user, is_retired: isRetired } : user));
+    if (isRetired && selectedEmail === target.email) {
+      const replacement = users.find((user) => user.id !== userId && !user.is_retired);
+      const nextEmail = replacement?.email ?? profile.email;
+      setSelectedEmail(nextEmail);
+      saveEmployeeSelection(profile.id, nextEmail);
+    }
+    flash(isRetired ? `${target.name ?? target.email}님을 퇴사자로 표시했습니다.` : `${target.name ?? target.email}님을 재직자로 복원했습니다.`);
+    return true;
+  }
+
   if (!session) return <AuthScreen busy={busy} siteUrl={siteUrl} supabase={supabase} />;
   if (!profile || !currentUser) return <LoadingScreen message="사용자 정보를 불러오는 중입니다" />;
 
@@ -1110,12 +1135,17 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
           <div><strong>{profile.name ?? profile.email.split("@")[0]}</strong><span>{subRole}</span></div>
         </div>
 
-        {profile.role === "관리자" && <button className={`admin-overview-button ${view === "leave-all" ? "active" : ""}`} onClick={() => selectView("leave-all")}><span>▦</span> 전체 직원 휴가 현황</button>}
+        {profile.role === "관리자" && (
+          <div className="admin-tool-menu">
+            <button className={`admin-overview-button ${view === "leave-all" ? "active" : ""}`} onClick={() => selectView("leave-all")}><span>▦</span> 전체 직원 휴가 현황</button>
+            <button className={`admin-overview-button ${view === "employee-status" ? "active" : ""}`} onClick={() => selectView("employee-status")}><span>✓</span> 직원 퇴사 여부 관리</button>
+          </div>
+        )}
 
         {profile.role === "관리자" && (
           <label className="field-label">직원 선택
             <select value={selectedEmail} onChange={(event) => selectUser(event.target.value)}>
-              {users.map((user) => <option key={user.id} value={user.email}>{user.name ?? "이름 없음"} · {user.email}</option>)}
+              {activeUsers.map((user) => <option key={user.id} value={user.email}>{user.name ?? "이름 없음"} · {user.email}</option>)}
             </select>
           </label>
         )}
@@ -1152,7 +1182,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
       <main className="main-area">
         {view !== "journal" && (
           <header className={`topbar no-print ${view === "leave-all" ? "leave-all-topbar" : ""}`}>
-            {view !== "leave-all" && <h1>{view === "leave" ? "휴가 사용 내역" : "특근 모아보기"}</h1>}
+            {view !== "leave-all" && <h1>{view === "leave" ? "휴가 사용 내역" : view === "employee-status" ? "직원 퇴사 여부 관리" : "특근 모아보기"}</h1>}
             {(view === "leave" || view === "leave-all") && <LeaveBasisSwitch value={leaveBasis} onChange={setLeaveBasis} />}
           </header>
         )}
@@ -1253,7 +1283,8 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
             />
           </div>
         )}
-        {view === "leave-all" && profile.role === "관리자" && <AllLeaveView users={users} logs={allHistoryLogs} basis={leaveBasis} onSave={saveHireDates} />}
+        {view === "leave-all" && profile.role === "관리자" && <AllLeaveView users={activeUsers} logs={allHistoryLogs} basis={leaveBasis} onSave={saveHireDates} />}
+        {view === "employee-status" && profile.role === "관리자" && <EmployeeStatusView users={users} onChange={saveRetirementStatus} />}
         {view === "special" && <HistoryView title="특근 누적 현황" metric={`${Math.floor(specialMinutes / 60)}시간 ${specialMinutes % 60}분`} summary={`총 ${specialRows.length}건의 특근 기록`} columns={["주차", "날짜", "시작", "소요", "업무 내용"]} rows={specialRows.map((row) => [row.week, row.날짜, row["시작 시각"], row["소요 시간"], row["업무 내용"]])} empty="기록된 특근 내역이 없습니다." />}
       </main>
 
@@ -1543,6 +1574,45 @@ function HireDateEditor({ user, onSave }: {
       <label>행정적 입사일<input type="date" value={administrativeHireDate} onChange={(event) => setAdministrativeHireDate(event.target.value)} /></label>
       <button className="button primary" disabled={saving}>{saving ? "저장 중…" : "입사일 저장"}</button>
     </form>
+  );
+}
+
+function EmployeeStatusView({ users, onChange }: {
+  users: RoleRow[];
+  onChange: (userId: string, isRetired: boolean) => Promise<boolean>;
+}) {
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const activeCount = users.filter((user) => !user.is_retired).length;
+
+  async function changeStatus(user: RoleRow, isRetired: boolean) {
+    if (isRetired && !window.confirm(`${user.name ?? user.email}님을 퇴사자로 표시하시겠습니까?\n직원 선택과 전체 직원 휴가 현황에서 숨겨집니다.`)) return;
+    setSavingUserId(user.id);
+    await onChange(user.id, isRetired);
+    setSavingUserId(null);
+  }
+
+  return (
+    <section className="employee-status-view">
+      <div className="employee-status-summary">
+        <div><p>EMPLOYMENT STATUS</p><strong>직원 재직 상태</strong><span>퇴사자는 기록을 유지하면서 일반 직원 목록에서만 숨깁니다.</span></div>
+        <div className="employee-status-counts"><span><b>{activeCount}</b>명 재직</span><span><b>{users.length - activeCount}</b>명 퇴사</span></div>
+      </div>
+      <div className="employee-status-table">
+        <div className="employee-status-head"><span>직원</span><span>이메일</span><span>현재 상태</span><span>퇴사 여부</span></div>
+        {users.map((user) => (
+          <div className="employee-status-row" key={user.id}>
+            <strong>{user.name ?? "이름 없음"}</strong>
+            <span>{user.email}</span>
+            <span className={`employment-state ${user.is_retired ? "retired" : "active"}`}>{user.is_retired ? "퇴사" : "재직"}</span>
+            <label className="retirement-check">
+              <input type="checkbox" checked={user.is_retired} disabled={savingUserId === user.id} onChange={(event) => changeStatus(user, event.target.checked)} />
+              <span>{savingUserId === user.id ? "저장 중…" : "퇴사자로 표시"}</span>
+            </label>
+          </div>
+        ))}
+        {!users.length && <div className="employee-status-empty">등록된 직원이 없습니다.</div>}
+      </div>
+    </section>
   );
 }
 
