@@ -3,10 +3,12 @@
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "./lib/supabase";
+import { accruedAnnualLeave, leaveDaysForType, parseLocalDate } from "./lib/leave";
 import { createZip, type ZipEntry } from "./lib/zip";
 
 type Role = "직원" | "관리자";
-type View = "journal" | "leave" | "special";
+type View = "journal" | "leave" | "leave-all" | "employee-status" | "special";
+type LeaveBasis = "actual" | "administrative";
 type AuthMode = "login" | "signup" | "recovery";
 type AuthFeedbackTone = "error" | "success";
 type AuthFeedback = { tone: AuthFeedbackTone; message: string } | null;
@@ -16,6 +18,9 @@ type RoleRow = {
   role: Role;
   name: string | null;
   email: string;
+  hire_date: string | null;
+  administrative_hire_date: string | null;
+  is_retired: boolean;
 };
 
 type Task = {
@@ -55,6 +60,12 @@ type LogRow = {
   week: string;
   status: string;
   data: Partial<WeekData> | null;
+};
+
+type LeaveHistoryEntry = Attendance & {
+  week: string;
+  user: RoleRow;
+  usedDays: number;
 };
 
 type BulkApprovalProgress = {
@@ -319,8 +330,9 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
   const [filter, setFilter] = useState("전체");
   const [defaultStart, setDefaultStart] = useState("09:00");
   const [defaultEnd, setDefaultEnd] = useState("18:00");
-  const [leaveTotal, setLeaveTotal] = useState(15);
+  const [leaveBasis, setLeaveBasis] = useState<LeaveBasis>("actual");
   const [historyLogs, setHistoryLogs] = useState<LogRow[]>([]);
+  const [allHistoryLogs, setAllHistoryLogs] = useState<LogRow[]>([]);
   const [busy, setBusy] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
@@ -348,11 +360,13 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
   const sessionUserId = session?.user.id ?? null;
   const sessionUserEmail = session?.user.email ?? "";
 
+  const activeUsers = useMemo(() => users.filter((user) => !user.is_retired), [users]);
+
   const currentUser = useMemo(() => {
     if (!profile) return null;
     if (profile.role !== "관리자") return profile;
-    return users.find((user) => user.email === selectedEmail) ?? profile;
-  }, [profile, selectedEmail, users]);
+    return activeUsers.find((user) => user.email === selectedEmail) ?? profile;
+  }, [activeUsers, profile, selectedEmail]);
 
   const subRole = useMemo(() => {
     const name = profile?.name ?? "";
@@ -453,7 +467,7 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
       setBusy(true);
       const { data, error } = await supabase
         .from("user_roles")
-        .select("id, role, name, email")
+        .select("id, role, name, email, hire_date, administrative_hire_date, is_retired")
         .eq("id", sessionUserId)
         .maybeSingle();
       if (!active) return;
@@ -463,6 +477,9 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
         email: sessionUserEmail,
         name: sessionUserEmail.split("@")[0] || "사용자",
         role: "직원",
+        hire_date: null,
+        administrative_hire_date: null,
+        is_retired: false,
       };
       setProfile(nextProfile);
       if (restoredWeekUserRef.current !== nextProfile.id) {
@@ -471,14 +488,15 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
       }
 
       if (nextProfile.role === "관리자") {
-        const { data: staff } = await supabase.from("user_roles").select("id, role, name, email");
+        const { data: staff } = await supabase.from("user_roles").select("id, role, name, email, hire_date, administrative_hire_date, is_retired");
         const staffRows = ((staff ?? []) as RoleRow[])
           .filter((item) => item.role !== "관리자")
           .sort((left, right) => KOREAN_COLLATOR.compare(employeeSortName(left), employeeSortName(right)) || left.email.localeCompare(right.email));
+        const activeStaffRows = staffRows.filter((item) => !item.is_retired);
         const previousEmail = savedEmployeeSelection(nextProfile.id);
-        const initialEmail = staffRows.some((item) => item.email === previousEmail)
+        const initialEmail = activeStaffRows.some((item) => item.email === previousEmail)
           ? previousEmail!
-          : staffRows[0]?.email ?? nextProfile.email;
+          : activeStaffRows[0]?.email ?? nextProfile.email;
         setUsers(staffRows);
         setSelectedEmail(initialEmail);
       } else {
@@ -528,11 +546,6 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
     setBusy(false);
   }, [flash, profile?.role, sessionUserId, supabase]);
 
-  const loadLeaveTotal = useCallback(async (email: string) => {
-    const { data } = await supabase.from("leave_entitlements").select("total_days").eq("email", email).maybeSingle();
-    setLeaveTotal(data?.total_days ?? 15);
-  }, [supabase]);
-
   const loadHistory = useCallback(async (email: string) => {
     if (!email) return;
     const { data } = await supabase
@@ -546,20 +559,40 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
     })));
   }, [supabase]);
 
+  const loadAllHistory = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("work_logs")
+      .select("id, user_id, email, week, status, data")
+      .order("week", { ascending: true });
+    if (error) {
+      flash(`전체 휴가 내역을 불러오지 못했습니다: ${error.message}`);
+      return;
+    }
+    setAllHistoryLogs(((data ?? []) as LogRow[]).map((log) => ({
+      ...log,
+      data: log.data ? normalizeData(log.week, log.data) : null,
+    })));
+  }, [flash, supabase]);
+
   useEffect(() => {
     if (!selectedEmail) return;
     // These loaders synchronize the journal with the newly selected user/week.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadStatusMap(selectedEmail);
-    loadLeaveTotal(selectedEmail);
     loadLog(selectedWeek, selectedEmail);
-  }, [loadLeaveTotal, loadLog, loadStatusMap, selectedEmail, selectedWeek]);
+  }, [loadLog, loadStatusMap, selectedEmail, selectedWeek]);
 
   useEffect(() => {
-    if (!selectedEmail || view === "journal") return;
+    if (!selectedEmail || !["leave", "special"].includes(view)) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadHistory(selectedEmail);
   }, [loadHistory, selectedEmail, view]);
+
+  useEffect(() => {
+    if (profile?.role !== "관리자" || view !== "leave-all") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadAllHistory();
+  }, [loadAllHistory, profile?.role, view]);
 
   function markChanged(updater: (value: WeekData) => WeekData) {
     if (profile?.role !== "직원" || !canEdit) return;
@@ -832,9 +865,11 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
 
   async function selectView(nextView: View) {
     if (nextView === view) return;
+    if (["leave-all", "employee-status"].includes(nextView) && profile?.role !== "관리자") return;
     await saveBeforeAction(async () => {
       setView(nextView);
-      if (nextView !== "journal") await loadHistory(selectedEmail);
+      if (["leave", "special"].includes(nextView)) await loadHistory(selectedEmail);
+      if (nextView === "leave-all") await loadAllHistory();
     });
   }
 
@@ -1036,20 +1071,52 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
     }
   }
 
-  async function changeLeaveTotal(value: number) {
-    setLeaveTotal(value);
-    if (profile?.role !== "직원") return;
-    const { error } = await supabase.from("leave_entitlements").upsert({ email: profile.email, total_days: value, updated_at: new Date().toISOString() });
-    if (error) flash(`연차 일수를 저장하지 못했습니다: ${error.message}`);
+  async function saveHireDates(userId: string, hireDate: string, administrativeHireDate: string) {
+    if (profile?.role !== "관리자") return false;
+    const updates = {
+      hire_date: hireDate || null,
+      administrative_hire_date: administrativeHireDate || null,
+    };
+    const { error } = await supabase.from("user_roles").update(updates).eq("id", userId);
+    if (error) {
+      flash(`입사일을 저장하지 못했습니다: ${error.message}`);
+      return false;
+    }
+    setUsers((current) => current.map((user) => user.id === userId ? { ...user, ...updates } : user));
+    flash("입사일을 저장했습니다.");
+    return true;
+  }
+
+  async function saveRetirementStatus(userId: string, isRetired: boolean) {
+    if (profile?.role !== "관리자") return false;
+    const target = users.find((user) => user.id === userId);
+    if (!target) return false;
+    const { data: updated, error } = await supabase.from("user_roles").update({ is_retired: isRetired }).eq("id", userId).select("id").maybeSingle();
+    if (error || !updated) {
+      flash(`퇴사 여부를 저장하지 못했습니다${error ? `: ${error.message}` : ". 관리자 권한을 확인해 주세요."}`);
+      return false;
+    }
+    setUsers((current) => current.map((user) => user.id === userId ? { ...user, is_retired: isRetired } : user));
+    if (isRetired && selectedEmail === target.email) {
+      const replacement = users.find((user) => user.id !== userId && !user.is_retired);
+      const nextEmail = replacement?.email ?? profile.email;
+      setSelectedEmail(nextEmail);
+      saveEmployeeSelection(profile.id, nextEmail);
+    }
+    flash(isRetired ? `${target.name ?? target.email}님을 퇴사자로 표시했습니다.` : `${target.name ?? target.email}님을 재직자로 복원했습니다.`);
+    return true;
   }
 
   if (!session) return <AuthScreen busy={busy} siteUrl={siteUrl} supabase={supabase} />;
   if (!profile || !currentUser) return <LoadingScreen message="사용자 정보를 불러오는 중입니다" />;
 
   const leaveRows = historyLogs.flatMap((log) => (log.data?.attendance ?? [])
-    .filter((item) => item.leave_type && item.leave_type !== "-")
+    .filter((item) => item.leave_type && !["-", "공휴일"].includes(item.leave_type))
     .map((item) => ({ ...item, week: log.week })));
-  const usedLeave = leaveRows.reduce((sum, item) => sum + ({ 연차: 1, 반차: 0.5, 반반차: 0.25 }[item.leave_type] ?? 0), 0);
+  const usedLeave = leaveRows.reduce((sum, item) => sum + leaveDaysForType(item.leave_type), 0);
+  const selectedBasisDate = leaveBasis === "actual" ? currentUser.hire_date : currentUser.administrative_hire_date;
+  const selectedHireDate = parseLocalDate(selectedBasisDate);
+  const leaveTotal = selectedHireDate ? accruedAnnualLeave(selectedHireDate).days : 0;
   const specialRows = historyLogs.flatMap((log) => (log.data?.special ?? [])
     .filter((item) => item["업무 내용"] || item.날짜)
     .map((item) => ({ ...item, week: log.week })));
@@ -1069,9 +1136,16 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
         </div>
 
         {profile.role === "관리자" && (
+          <div className="admin-tool-menu">
+            <button className={`admin-overview-button ${view === "leave-all" ? "active" : ""}`} onClick={() => selectView("leave-all")}><span>▦</span> 전체 직원 휴가 현황</button>
+            <button className={`admin-overview-button ${view === "employee-status" ? "active" : ""}`} onClick={() => selectView("employee-status")}><span>✓</span> 직원 퇴사 여부 관리</button>
+          </div>
+        )}
+
+        {profile.role === "관리자" && (
           <label className="field-label">직원 선택
             <select value={selectedEmail} onChange={(event) => selectUser(event.target.value)}>
-              {users.map((user) => <option key={user.id} value={user.email}>{user.name ?? "이름 없음"} · {user.email}</option>)}
+              {activeUsers.map((user) => <option key={user.id} value={user.email}>{user.name ?? "이름 없음"} · {user.email}</option>)}
             </select>
           </label>
         )}
@@ -1099,11 +1173,6 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
             <strong>기본 출퇴근 시간</strong>
             <div className="time-row"><input value={defaultStart} onChange={(e) => setDefaultStart(e.target.value)} aria-label="기본 출근 시간" /><span>—</span><input value={defaultEnd} onChange={(e) => setDefaultEnd(e.target.value)} aria-label="기본 퇴근 시간" /></div>
             <button className="text-button" onClick={fillDefaultTimes}>빈 시간에 적용</button>
-            <label>연차 최대 사용가능 수
-              <select value={leaveTotal} onChange={(event) => changeLeaveTotal(Number(event.target.value))}>
-                {Array.from({ length: 25 }, (_, index) => index + 1).map((value) => <option key={value}>{value}</option>)}
-              </select>
-            </label>
           </div>
         )}
 
@@ -1112,8 +1181,9 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
 
       <main className="main-area">
         {view !== "journal" && (
-          <header className="topbar no-print">
-            <h1>{view === "leave" ? "휴가 사용 내역" : "특근 모아보기"}</h1>
+          <header className={`topbar no-print ${view === "leave-all" ? "leave-all-topbar" : ""}`}>
+            {view !== "leave-all" && <h1>{view === "leave" ? "휴가 사용 내역" : view === "employee-status" ? "직원 퇴사 여부 관리" : "특근 모아보기"}</h1>}
+            {(view === "leave" || view === "leave-all") && <LeaveBasisSwitch value={leaveBasis} onChange={setLeaveBasis} />}
           </header>
         )}
 
@@ -1198,7 +1268,23 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
           </>
         )}
 
-        {view === "leave" && <HistoryView title="휴가 사용 현황" metric={`잔여 ${leaveTotal - usedLeave}일`} summary={`총 발생 ${leaveTotal}일 · 사용 ${usedLeave}일`} columns={["주차", "날짜", "구분", "출근", "퇴근"]} rows={leaveRows.map((row) => [row.week, row.date, row.leave_type, row.start_time, row.end_time])} empty="기록된 휴가 내역이 없습니다." />}
+        {view === "leave" && (
+          <div className="leave-view-stack">
+            {profile.role === "관리자" && <HireDateEditor key={currentUser.id} user={currentUser} onSave={saveHireDates} />}
+            <HistoryView
+              title={`${currentUser.name ?? currentUser.email} 휴가 사용 현황`}
+              metric={selectedHireDate ? `잔여 ${leaveTotal - usedLeave}일` : "입사일 미등록"}
+              summary={selectedHireDate
+                ? `${leaveBasis === "actual" ? "실제" : "행정적"} 입사일 ${selectedBasisDate} · 총 발생 ${leaveTotal}일 · 사용 ${usedLeave}일`
+                : `${leaveBasis === "actual" ? "실제" : "행정적"} 입사일을 먼저 등록해 주세요.`}
+              columns={["주차", "날짜", "구분", "출근", "퇴근"]}
+              rows={leaveRows.map((row) => [row.week, row.date, row.leave_type, row.start_time, row.end_time])}
+              empty="공휴일을 제외한 휴가 내역이 없습니다."
+            />
+          </div>
+        )}
+        {view === "leave-all" && profile.role === "관리자" && <AllLeaveView users={activeUsers} logs={allHistoryLogs} basis={leaveBasis} onSave={saveHireDates} />}
+        {view === "employee-status" && profile.role === "관리자" && <EmployeeStatusView users={users} onChange={saveRetirementStatus} />}
         {view === "special" && <HistoryView title="특근 누적 현황" metric={`${Math.floor(specialMinutes / 60)}시간 ${specialMinutes % 60}분`} summary={`총 ${specialRows.length}건의 특근 기록`} columns={["주차", "날짜", "시작", "소요", "업무 내용"]} rows={specialRows.map((row) => [row.week, row.날짜, row["시작 시각"], row["소요 시간"], row["업무 내용"]])} empty="기록된 특근 내역이 없습니다." />}
       </main>
 
@@ -1447,6 +1533,174 @@ function TaskRow({ task, disabled, onChange, onRemove }: { task: Task; disabled:
 
 function SpecialRow({ item, disabled, onChange, onRemove }: { item: SpecialTask; disabled: boolean; onChange: (field: keyof SpecialTask, value: string) => void; onRemove: () => void }) {
   return <div className="special-row"><input disabled={disabled} value={item.날짜 ?? ""} onChange={(e) => onChange("날짜", e.target.value)} placeholder={disabled ? undefined : "2026-01-01"} /><input disabled={disabled} value={item.요일 ?? ""} onChange={(e) => onChange("요일", e.target.value)} placeholder={disabled ? undefined : "월"} /><input disabled={disabled} value={item["시작 시각"] ?? ""} onChange={(e) => onChange("시작 시각", e.target.value)} placeholder={disabled ? undefined : "18:00"} /><input disabled={disabled} value={item["소요 시간"] ?? ""} onChange={(e) => onChange("소요 시간", e.target.value)} placeholder={disabled ? undefined : "60분"} /><input disabled={disabled} value={item["업무 내용"] ?? ""} onChange={(e) => onChange("업무 내용", e.target.value)} placeholder={disabled ? undefined : "특근 업무 내용"} /><input disabled={disabled} value={item.진행률 ?? ""} onChange={(e) => onChange("진행률", e.target.value)} placeholder={disabled ? undefined : "100%"} />{!disabled ? <button className="remove-row no-print" onClick={onRemove} aria-label="행 삭제">×</button> : <span />}</div>;
+}
+
+function formatLeaveDays(value: number) {
+  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value);
+}
+
+function LeaveBasisSwitch({ value, onChange }: { value: LeaveBasis; onChange: (value: LeaveBasis) => void }) {
+  return (
+    <div className="basis-switch" role="group" aria-label="연차 계산 입사일 기준">
+      <button type="button" className={value === "actual" ? "active" : ""} aria-pressed={value === "actual"} onClick={() => onChange("actual")}>실제 입사일</button>
+      <button type="button" className={value === "administrative" ? "active" : ""} aria-pressed={value === "administrative"} onClick={() => onChange("administrative")}>행정적 입사일</button>
+    </div>
+  );
+}
+
+function HireDateEditor({ user, onSave }: {
+  user: RoleRow;
+  onSave: (userId: string, hireDate: string, administrativeHireDate: string) => Promise<boolean>;
+}) {
+  const [hireDate, setHireDate] = useState(user.hire_date ?? "");
+  const [administrativeHireDate, setAdministrativeHireDate] = useState(user.administrative_hire_date ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    await onSave(user.id, hireDate, administrativeHireDate);
+    setSaving(false);
+  }
+
+  return (
+    <form className="hire-date-editor no-print" onSubmit={submit}>
+      <div>
+        <p>EMPLOYEE DATES</p>
+        <strong>{user.name ?? user.email}</strong>
+        <span>관리자만 입사일을 수정할 수 있습니다.</span>
+      </div>
+      <label>실제 입사일<input type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} /></label>
+      <label>행정적 입사일<input type="date" value={administrativeHireDate} onChange={(event) => setAdministrativeHireDate(event.target.value)} /></label>
+      <button className="button primary" disabled={saving}>{saving ? "저장 중…" : "입사일 저장"}</button>
+    </form>
+  );
+}
+
+function EmployeeStatusView({ users, onChange }: {
+  users: RoleRow[];
+  onChange: (userId: string, isRetired: boolean) => Promise<boolean>;
+}) {
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const activeCount = users.filter((user) => !user.is_retired).length;
+
+  async function changeStatus(user: RoleRow, isRetired: boolean) {
+    if (isRetired && !window.confirm(`${user.name ?? user.email}님을 퇴사자로 표시하시겠습니까?\n직원 선택과 전체 직원 휴가 현황에서 숨겨집니다.`)) return;
+    setSavingUserId(user.id);
+    await onChange(user.id, isRetired);
+    setSavingUserId(null);
+  }
+
+  return (
+    <section className="employee-status-view">
+      <div className="employee-status-summary">
+        <div><p>EMPLOYMENT STATUS</p><strong>직원 재직 상태</strong><span>퇴사자는 기록을 유지하면서 일반 직원 목록에서만 숨깁니다.</span></div>
+        <div className="employee-status-counts"><span><b>{activeCount}</b>명 재직</span><span><b>{users.length - activeCount}</b>명 퇴사</span></div>
+      </div>
+      <div className="employee-status-table">
+        <div className="employee-status-head"><span>직원</span><span>이메일</span><span>현재 상태</span><span>퇴사 여부</span></div>
+        {users.map((user) => (
+          <div className="employee-status-row" key={user.id}>
+            <strong>{user.name ?? "이름 없음"}</strong>
+            <span>{user.email}</span>
+            <span className={`employment-state ${user.is_retired ? "retired" : "active"}`}>{user.is_retired ? "퇴사" : "재직"}</span>
+            <label className="retirement-check">
+              <input type="checkbox" checked={user.is_retired} disabled={savingUserId === user.id} onChange={(event) => changeStatus(user, event.target.checked)} />
+              <span>{savingUserId === user.id ? "저장 중…" : "퇴사자로 표시"}</span>
+            </label>
+          </div>
+        ))}
+        {!users.length && <div className="employee-status-empty">등록된 직원이 없습니다.</div>}
+      </div>
+    </section>
+  );
+}
+
+function AllLeaveView({ users, logs, basis, onSave }: {
+  users: RoleRow[];
+  logs: LogRow[];
+  basis: LeaveBasis;
+  onSave: (userId: string, hireDate: string, administrativeHireDate: string) => Promise<boolean>;
+}) {
+  const usersByEmail = new Map(users.map((user) => [user.email, user]));
+  const leaveEntries: LeaveHistoryEntry[] = logs.flatMap((log) => {
+    const user = usersByEmail.get(log.email);
+    if (!user) return [];
+    return (log.data?.attendance ?? [])
+      .filter((item) => item.leave_type && !["-", "공휴일"].includes(item.leave_type))
+      .map((item) => ({ ...item, week: log.week, user, usedDays: leaveDaysForType(item.leave_type) }));
+  })
+    .sort((left, right) => right.date.localeCompare(left.date));
+  const entriesByUser = new Map<string, LeaveHistoryEntry[]>();
+  leaveEntries.forEach((entry) => {
+    const entries = entriesByUser.get(entry.user.id) ?? [];
+    entries.push(entry);
+    entriesByUser.set(entry.user.id, entries);
+  });
+
+  const summaries = users.map((user) => {
+    const basisDate = basis === "actual" ? user.hire_date : user.administrative_hire_date;
+    const parsedDate = parseLocalDate(basisDate);
+    const total = parsedDate ? accruedAnnualLeave(parsedDate).days : null;
+    const entries = entriesByUser.get(user.id) ?? [];
+    const used = entries.reduce((sum, entry) => sum + entry.usedDays, 0);
+    return { user, entries, basisDate, total, used, remaining: total === null ? null : total - used };
+  });
+  const totalUsed = summaries.reduce((sum, item) => sum + item.used, 0);
+
+  return (
+    <section className="all-leave-view">
+      <div className="all-leave-summary compact">
+        <div><strong>전체 직원 연차 요약</strong><span>{basis === "actual" ? "실제 입사일" : "행정적 입사일"} 기준 · 공휴일 제외</span></div>
+        <div className="all-leave-stats"><span><b>{users.length}</b>명</span><span><b>{formatLeaveDays(totalUsed)}</b>일 사용</span><span><b>{leaveEntries.length}</b>건</span></div>
+      </div>
+      <div className="compact-leave-table">
+        <div className="compact-leave-head"><span>직원</span><span>실제 입사일</span><span>행정적 입사일</span><span>저장</span><span>최대</span><span>사용</span><span>잔여</span><span>내역</span></div>
+        {summaries.map((summary) => <CompactEmployeeLeaveRow key={`${summary.user.id}-${summary.user.hire_date}-${summary.user.administrative_hire_date}`} {...summary} basis={basis} onSave={onSave} />)}
+      </div>
+    </section>
+  );
+}
+
+function CompactEmployeeLeaveRow({ user, entries, basis, basisDate, total, used, remaining, onSave }: {
+  user: RoleRow;
+  entries: LeaveHistoryEntry[];
+  basis: LeaveBasis;
+  basisDate: string | null;
+  total: number | null;
+  used: number;
+  remaining: number | null;
+  onSave: (userId: string, hireDate: string, administrativeHireDate: string) => Promise<boolean>;
+}) {
+  const [hireDate, setHireDate] = useState(user.hire_date ?? "");
+  const [administrativeHireDate, setAdministrativeHireDate] = useState(user.administrative_hire_date ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    await onSave(user.id, hireDate, administrativeHireDate);
+    setSaving(false);
+  }
+
+  return (
+    <form className="compact-leave-row" onSubmit={submit}>
+      <span className="compact-employee"><strong>{user.name ?? "이름 없음"}</strong><small>{user.email}</small></span>
+      <label><span className="sr-only">{user.name ?? user.email} 실제 입사일</span><input type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} /></label>
+      <label><span className="sr-only">{user.name ?? user.email} 행정적 입사일</span><input type="date" value={administrativeHireDate} onChange={(event) => setAdministrativeHireDate(event.target.value)} /></label>
+      <button className="compact-save" disabled={saving}>{saving ? "…" : "저장"}</button>
+      <span title={`${basis === "actual" ? "실제" : "행정적"} 입사일 ${basisDate ?? "미등록"}`}>{total === null ? "-" : formatLeaveDays(total)}</span>
+      <span>{formatLeaveDays(used)}</span>
+      <span className={remaining !== null && remaining < 0 ? "negative" : ""}>{remaining === null ? "-" : formatLeaveDays(remaining)}</span>
+      <details className="compact-leave-details">
+        <summary>{entries.length}건</summary>
+        <div className="compact-history-table">
+          <div className="compact-history-head"><span>날짜</span><span>구분</span><span>주차</span><span>출근</span><span>퇴근</span><span>사용</span></div>
+          {entries.length ? entries.map((entry, index) => <div className="compact-history-row" key={`${entry.week}-${entry.date}-${index}`}><span>{entry.date}</span><span>{entry.leave_type}</span><span>{entry.week}</span><span>{entry.start_time || "-"}</span><span>{entry.end_time || "-"}</span><span>{entry.usedDays ? formatLeaveDays(entry.usedDays) : "-"}</span></div>) : <div className="compact-history-empty">공휴일을 제외한 휴가 기록 없음</div>}
+        </div>
+      </details>
+    </form>
+  );
 }
 
 function HistoryView({ title, metric, summary, columns, rows, empty }: { title: string; metric: string; summary: string; columns: string[]; rows: string[][]; empty: string }) {
