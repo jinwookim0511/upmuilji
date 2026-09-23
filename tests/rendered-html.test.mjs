@@ -253,3 +253,17 @@ test("places the compact organization leave shortcut above employee selection", 
   assert.match(styles, /\.all-leave-summary\.compact \{ min-height: 58px/);
   assert.match(styles, /\.compact-leave-row \{ min-height: 39px/);
 });
+
+test("keeps the organization leave view compact while enlarging its text and placing save beside hire dates", async () => {
+  const [workLogApp, styles] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workLogApp, /view !== "leave-all" && <h1>/);
+  assert.match(workLogApp, /<span>행정적 입사일<\/span><span>저장<\/span><span>최대<\/span>/);
+  assert.match(workLogApp, /행정적 입사일[\s\S]*?<\/label>\s*<button className="compact-save"[\s\S]*?<span title=/);
+  assert.match(styles, /\.leave-all-topbar \{ min-height: 48px; justify-content: flex-end; \}/);
+  assert.match(styles, /\.compact-leave-head \{[^\n]*font-size: 9px/);
+  assert.match(styles, /\.compact-leave-row \{[^\n]*font-size: 10px/);
+});

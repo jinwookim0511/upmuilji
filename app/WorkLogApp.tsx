@@ -1151,8 +1151,8 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
 
       <main className="main-area">
         {view !== "journal" && (
-          <header className="topbar no-print">
-            <h1>{view === "leave" ? "휴가 사용 내역" : view === "leave-all" ? "전체 직원 휴가 현황" : "특근 모아보기"}</h1>
+          <header className={`topbar no-print ${view === "leave-all" ? "leave-all-topbar" : ""}`}>
+            {view !== "leave-all" && <h1>{view === "leave" ? "휴가 사용 내역" : "특근 모아보기"}</h1>}
             {(view === "leave" || view === "leave-all") && <LeaveBasisSwitch value={leaveBasis} onChange={setLeaveBasis} />}
           </header>
         )}
@@ -1585,7 +1585,7 @@ function AllLeaveView({ users, logs, basis, onSave }: {
         <div className="all-leave-stats"><span><b>{users.length}</b>명</span><span><b>{formatLeaveDays(totalUsed)}</b>일 사용</span><span><b>{leaveEntries.length}</b>건</span></div>
       </div>
       <div className="compact-leave-table">
-        <div className="compact-leave-head"><span>직원</span><span>실제 입사일</span><span>행정적 입사일</span><span>최대</span><span>사용</span><span>잔여</span><span>저장</span><span>내역</span></div>
+        <div className="compact-leave-head"><span>직원</span><span>실제 입사일</span><span>행정적 입사일</span><span>저장</span><span>최대</span><span>사용</span><span>잔여</span><span>내역</span></div>
         {summaries.map((summary) => <CompactEmployeeLeaveRow key={`${summary.user.id}-${summary.user.hire_date}-${summary.user.administrative_hire_date}`} {...summary} basis={basis} onSave={onSave} />)}
       </div>
     </section>
@@ -1618,10 +1618,10 @@ function CompactEmployeeLeaveRow({ user, entries, basis, basisDate, total, used,
       <span className="compact-employee"><strong>{user.name ?? "이름 없음"}</strong><small>{user.email}</small></span>
       <label><span className="sr-only">{user.name ?? user.email} 실제 입사일</span><input type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} /></label>
       <label><span className="sr-only">{user.name ?? user.email} 행정적 입사일</span><input type="date" value={administrativeHireDate} onChange={(event) => setAdministrativeHireDate(event.target.value)} /></label>
+      <button className="compact-save" disabled={saving}>{saving ? "…" : "저장"}</button>
       <span title={`${basis === "actual" ? "실제" : "행정적"} 입사일 ${basisDate ?? "미등록"}`}>{total === null ? "-" : formatLeaveDays(total)}</span>
       <span>{formatLeaveDays(used)}</span>
       <span className={remaining !== null && remaining < 0 ? "negative" : ""}>{remaining === null ? "-" : formatLeaveDays(remaining)}</span>
-      <button className="compact-save" disabled={saving}>{saving ? "…" : "저장"}</button>
       <details className="compact-leave-details">
         <summary>{entries.length}건</summary>
         <div className="compact-history-table">
