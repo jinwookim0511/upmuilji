@@ -226,6 +226,11 @@ test("provides admin-managed hire dates and organization-wide leave reporting", 
   assert.match(workLogApp, /function LeaveBasisSwitch/);
   assert.match(workLogApp, /function HireDateEditor/);
   assert.match(workLogApp, /function AllLeaveView/);
+  assert.match(workLogApp, /<AllLeaveView users=\{users\} logs=\{allHistoryLogs\} basis=\{leaveBasis\} onSave=\{saveHireDates\}/);
+  assert.match(workLogApp, /className="employee-leave-group"/);
+  assert.match(workLogApp, /<HireDateEditor key=\{`\$\{user\.id\}-\$\{user\.hire_date\}-\$\{user\.administrative_hire_date\}`\} user=\{user\} onSave=\{onSave\}/);
+  assert.match(workLogApp, /const entriesByUser = new Map/);
+  assert.match(workLogApp, /공휴일을 제외한 휴가 기록이 없습니다\./);
   assert.match(workLogApp, /!\["-", "공휴일"\]\.includes\(item\.leave_type\)/);
   assert.doesNotMatch(workLogApp, /leave_entitlements|changeLeaveTotal/);
   assert.match(migration, /add column if not exists hire_date date/);
