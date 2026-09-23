@@ -61,6 +61,12 @@ type LogRow = {
   data: Partial<WeekData> | null;
 };
 
+type LeaveHistoryEntry = Attendance & {
+  week: string;
+  user: RoleRow;
+  usedDays: number;
+};
+
 type BulkApprovalProgress = {
   active: boolean;
   phase: "signing" | "refreshing" | "mailing" | "complete";
@@ -1104,6 +1110,8 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
           <div><strong>{profile.name ?? profile.email.split("@")[0]}</strong><span>{subRole}</span></div>
         </div>
 
+        {profile.role === "관리자" && <button className={`admin-overview-button ${view === "leave-all" ? "active" : ""}`} onClick={() => selectView("leave-all")}><span>▦</span> 전체 직원 휴가 현황</button>}
+
         {profile.role === "관리자" && (
           <label className="field-label">직원 선택
             <select value={selectedEmail} onChange={(event) => selectUser(event.target.value)}>
@@ -1115,7 +1123,6 @@ export default function WorkLogApp({ supabaseUrl, supabasePublishableKey, siteUr
         <nav className="side-nav" aria-label="주요 화면">
           <button className={view === "journal" ? "active" : ""} onClick={() => selectView("journal")}><span>▤</span> 주간 업무일지</button>
           <button className={view === "leave" ? "active" : ""} onClick={() => selectView("leave")}><span>◷</span> 휴가 사용 내역</button>
-          {profile.role === "관리자" && <button className={view === "leave-all" ? "active" : ""} onClick={() => selectView("leave-all")}><span>▦</span> 전체 직원 휴가 현황</button>}
           <button className={view === "special" ? "active" : ""} onClick={() => selectView("special")}><span>⌁</span> 특근 모아보기</button>
         </nav>
 
@@ -1546,19 +1553,16 @@ function AllLeaveView({ users, logs, basis, onSave }: {
   onSave: (userId: string, hireDate: string, administrativeHireDate: string) => Promise<boolean>;
 }) {
   const usersByEmail = new Map(users.map((user) => [user.email, user]));
-  const leaveEntries = logs.flatMap((log) => (log.data?.attendance ?? [])
-    .filter((item) => item.leave_type && !["-", "공휴일"].includes(item.leave_type))
-    .map((item) => ({
-      ...item,
-      week: log.week,
-      user: usersByEmail.get(log.email),
-      usedDays: leaveDaysForType(item.leave_type),
-    })))
-    .filter((entry) => entry.user)
+  const leaveEntries: LeaveHistoryEntry[] = logs.flatMap((log) => {
+    const user = usersByEmail.get(log.email);
+    if (!user) return [];
+    return (log.data?.attendance ?? [])
+      .filter((item) => item.leave_type && !["-", "공휴일"].includes(item.leave_type))
+      .map((item) => ({ ...item, week: log.week, user, usedDays: leaveDaysForType(item.leave_type) }));
+  })
     .sort((left, right) => right.date.localeCompare(left.date));
-  const entriesByUser = new Map<string, typeof leaveEntries>();
+  const entriesByUser = new Map<string, LeaveHistoryEntry[]>();
   leaveEntries.forEach((entry) => {
-    if (!entry.user) return;
     const entries = entriesByUser.get(entry.user.id) ?? [];
     entries.push(entry);
     entriesByUser.set(entry.user.id, entries);
@@ -1576,47 +1580,56 @@ function AllLeaveView({ users, logs, basis, onSave }: {
 
   return (
     <section className="all-leave-view">
-      <div className="all-leave-summary">
-        <div>
-          <p>ORGANIZATION LEAVE</p>
-          <strong>{users.length}명</strong>
-          <span>{basis === "actual" ? "실제 입사일" : "행정적 입사일"} 기준 · 총 사용 {formatLeaveDays(totalUsed)}일 · 공휴일 제외</span>
-        </div>
-        <div className="summary-art">{leaveEntries.length}</div>
+      <div className="all-leave-summary compact">
+        <div><strong>전체 직원 연차 요약</strong><span>{basis === "actual" ? "실제 입사일" : "행정적 입사일"} 기준 · 공휴일 제외</span></div>
+        <div className="all-leave-stats"><span><b>{users.length}</b>명</span><span><b>{formatLeaveDays(totalUsed)}</b>일 사용</span><span><b>{leaveEntries.length}</b>건</span></div>
       </div>
-      <div className="employee-leave-groups">
-        {summaries.map(({ user, entries, basisDate, total, used, remaining }) => (
-          <article className="employee-leave-group" key={user.id} aria-labelledby={`employee-leave-${user.id}`}>
-            <header className="employee-leave-group-header">
-              <div className="employee-leave-identity">
-                <div className="avatar">{(user.name ?? user.email).slice(0, 1)}</div>
-                <div>
-                  <h2 id={`employee-leave-${user.id}`}>{user.name ?? "이름 없음"}</h2>
-                  <p>{user.email}</p>
-                  <span>{basis === "actual" ? "실제" : "행정적"} 입사일 기준 · {basisDate ?? "미등록"}</span>
-                </div>
-              </div>
-              <div className="employee-leave-metrics">
-                <span><small>최대 가능</small><strong>{total === null ? "-" : `${formatLeaveDays(total)}일`}</strong></span>
-                <span><small>사용</small><strong>{formatLeaveDays(used)}일</strong></span>
-                <span className={remaining !== null && remaining < 0 ? "negative" : ""}><small>잔여</small><strong>{remaining === null ? "-" : `${formatLeaveDays(remaining)}일`}</strong></span>
-              </div>
-            </header>
-
-            <HireDateEditor key={`${user.id}-${user.hire_date}-${user.administrative_hire_date}`} user={user} onSave={onSave} />
-
-            <div className="employee-leave-history">
-              <div className="employee-leave-history-head"><span>날짜</span><span>구분</span><span>주차</span><span>출근</span><span>퇴근</span><span>사용일수</span></div>
-              {entries.length ? entries.map((entry, index) => (
-                <div className="employee-leave-history-row" key={`${entry.week}-${entry.date}-${index}`}>
-                  <span>{entry.date}</span><span>{entry.leave_type}</span><span>{entry.week}</span><span>{entry.start_time || "-"}</span><span>{entry.end_time || "-"}</span><span>{entry.usedDays ? formatLeaveDays(entry.usedDays) : "-"}</span>
-                </div>
-              )) : <div className="employee-leave-empty">공휴일을 제외한 휴가 기록이 없습니다.</div>}
-            </div>
-          </article>
-        ))}
+      <div className="compact-leave-table">
+        <div className="compact-leave-head"><span>직원</span><span>실제 입사일</span><span>행정적 입사일</span><span>최대</span><span>사용</span><span>잔여</span><span>저장</span><span>내역</span></div>
+        {summaries.map((summary) => <CompactEmployeeLeaveRow key={`${summary.user.id}-${summary.user.hire_date}-${summary.user.administrative_hire_date}`} {...summary} basis={basis} onSave={onSave} />)}
       </div>
     </section>
+  );
+}
+
+function CompactEmployeeLeaveRow({ user, entries, basis, basisDate, total, used, remaining, onSave }: {
+  user: RoleRow;
+  entries: LeaveHistoryEntry[];
+  basis: LeaveBasis;
+  basisDate: string | null;
+  total: number | null;
+  used: number;
+  remaining: number | null;
+  onSave: (userId: string, hireDate: string, administrativeHireDate: string) => Promise<boolean>;
+}) {
+  const [hireDate, setHireDate] = useState(user.hire_date ?? "");
+  const [administrativeHireDate, setAdministrativeHireDate] = useState(user.administrative_hire_date ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    await onSave(user.id, hireDate, administrativeHireDate);
+    setSaving(false);
+  }
+
+  return (
+    <form className="compact-leave-row" onSubmit={submit}>
+      <span className="compact-employee"><strong>{user.name ?? "이름 없음"}</strong><small>{user.email}</small></span>
+      <label><span className="sr-only">{user.name ?? user.email} 실제 입사일</span><input type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)} /></label>
+      <label><span className="sr-only">{user.name ?? user.email} 행정적 입사일</span><input type="date" value={administrativeHireDate} onChange={(event) => setAdministrativeHireDate(event.target.value)} /></label>
+      <span title={`${basis === "actual" ? "실제" : "행정적"} 입사일 ${basisDate ?? "미등록"}`}>{total === null ? "-" : formatLeaveDays(total)}</span>
+      <span>{formatLeaveDays(used)}</span>
+      <span className={remaining !== null && remaining < 0 ? "negative" : ""}>{remaining === null ? "-" : formatLeaveDays(remaining)}</span>
+      <button className="compact-save" disabled={saving}>{saving ? "…" : "저장"}</button>
+      <details className="compact-leave-details">
+        <summary>{entries.length}건</summary>
+        <div className="compact-history-table">
+          <div className="compact-history-head"><span>날짜</span><span>구분</span><span>주차</span><span>출근</span><span>퇴근</span><span>사용</span></div>
+          {entries.length ? entries.map((entry, index) => <div className="compact-history-row" key={`${entry.week}-${entry.date}-${index}`}><span>{entry.date}</span><span>{entry.leave_type}</span><span>{entry.week}</span><span>{entry.start_time || "-"}</span><span>{entry.end_time || "-"}</span><span>{entry.usedDays ? formatLeaveDays(entry.usedDays) : "-"}</span></div>) : <div className="compact-history-empty">공휴일을 제외한 휴가 기록 없음</div>}
+        </div>
+      </details>
+    </form>
   );
 }
 

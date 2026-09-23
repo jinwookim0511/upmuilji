@@ -222,19 +222,34 @@ test("provides admin-managed hire dates and organization-wide leave reporting", 
 
   assert.match(workLogApp, /hire_date: string \| null/);
   assert.match(workLogApp, /administrative_hire_date: string \| null/);
-  assert.match(workLogApp, /profile\.role === "관리자" && <button className=\{view === "leave-all"[\s\S]*?selectView\("leave-all"\)/);
+  assert.match(workLogApp, /profile\.role === "관리자" && <button className=\{`admin-overview-button[\s\S]*?selectView\("leave-all"\)/);
   assert.match(workLogApp, /function LeaveBasisSwitch/);
   assert.match(workLogApp, /function HireDateEditor/);
   assert.match(workLogApp, /function AllLeaveView/);
   assert.match(workLogApp, /<AllLeaveView users=\{users\} logs=\{allHistoryLogs\} basis=\{leaveBasis\} onSave=\{saveHireDates\}/);
-  assert.match(workLogApp, /className="employee-leave-group"/);
-  assert.match(workLogApp, /<HireDateEditor key=\{`\$\{user\.id\}-\$\{user\.hire_date\}-\$\{user\.administrative_hire_date\}`\} user=\{user\} onSave=\{onSave\}/);
+  assert.match(workLogApp, /function CompactEmployeeLeaveRow/);
+  assert.match(workLogApp, /className="compact-leave-table"/);
+  assert.match(workLogApp, /className="compact-leave-details"/);
   assert.match(workLogApp, /const entriesByUser = new Map/);
-  assert.match(workLogApp, /공휴일을 제외한 휴가 기록이 없습니다\./);
+  assert.match(workLogApp, /공휴일을 제외한 휴가 기록 없음/);
   assert.match(workLogApp, /!\["-", "공휴일"\]\.includes\(item\.leave_type\)/);
   assert.doesNotMatch(workLogApp, /leave_entitlements|changeLeaveTotal/);
   assert.match(migration, /add column if not exists hire_date date/);
   assert.match(migration, /add column if not exists administrative_hire_date date/);
   assert.match(migration, /create policy user_roles_update_hire_dates_admin/);
   assert.match(migration, /grant update \(hire_date, administrative_hire_date\)/);
+});
+
+test("places the compact organization leave shortcut above employee selection", async () => {
+  const [workLogApp, styles] = await Promise.all([
+    readFile(new URL("../app/WorkLogApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const overviewButton = workLogApp.indexOf("admin-overview-button");
+  const employeeSelection = workLogApp.indexOf('<label className="field-label">직원 선택');
+
+  assert.ok(overviewButton >= 0 && overviewButton < employeeSelection);
+  assert.equal(workLogApp.match(/admin-overview-button/g)?.length, 1);
+  assert.match(styles, /\.all-leave-summary\.compact \{ min-height: 58px/);
+  assert.match(styles, /\.compact-leave-row \{ min-height: 39px/);
 });
