@@ -9,17 +9,11 @@ function startOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
-function anniversaryAfterYears(hireDate: Date, years: number) {
-  const targetYear = hireDate.getFullYear() + years;
-  const lastDay = new Date(targetYear, hireDate.getMonth() + 1, 0).getDate();
-  return new Date(targetYear, hireDate.getMonth(), Math.min(hireDate.getDate(), lastDay));
-}
-
 /**
  * 연차 계산용 인정 근무 개월 수.
  *
- * 입사 월은 입사일부터 말일까지(입사일 포함) 15일 이상이면 다음 달 1일에
- * 첫 1개월로 인정합니다. 15일 미만이면 첫 온전한 달이 지난 뒤부터 셉니다.
+ * 입사일이 15일 이내(15일 포함)이면 다음 달 1일에 입사 월을 첫 1개월로
+ * 인정합니다. 16일 이후 입사자는 첫 온전한 달이 지난 뒤부터 셉니다.
  */
 export function completedLeaveMonths(hireDate: Date, asOf: Date): number {
   const hire = startOfDay(hireDate);
@@ -32,16 +26,16 @@ export function completedLeaveMonths(hireDate: Date, asOf: Date): number {
     (reference.getFullYear() - hire.getFullYear()) * 12
     + reference.getMonth()
     - hire.getMonth();
-  const lastDayOfHireMonth = new Date(hire.getFullYear(), hire.getMonth() + 1, 0).getDate();
-  const initialMonthCounts = lastDayOfHireMonth - hire.getDate() + 1 >= 15;
+  const initialMonthCounts = hire.getDate() <= 15;
 
   return Math.max(0, calendarMonthDifference - (initialMonthCounts ? 0 : 1));
 }
 
 /**
  * 근로기준법 제60조를 기준으로 한 발생 연차.
- * 1년 미만은 인정 근무 월마다 1일(최대 11일), 만 1년 이후에는 회계연도
- * 기준 15일에서 3년차부터 2년마다 1일을 더하며 최대 25일입니다.
+ * 1년 미만은 인정 근무 월마다 1일(최대 11일)입니다. 매년 1월 1일을 기준으로
+ * 인정 근무 개월이 12개월 이상이어야 만 1년으로 간주하며, 연중에는 최대
+ * 연차일수를 갱신하지 않습니다. 만 3년부터 2년마다 1일을 더해 최대 25일입니다.
  */
 export function accruedAnnualLeave(hireDate: Date, asOf: Date = new Date()): LeaveResult {
   const hire = startOfDay(hireDate);
@@ -52,7 +46,11 @@ export function accruedAnnualLeave(hireDate: Date, asOf: Date = new Date()): Lea
     return { category: "before_join", label: "입사 예정", days: 0, monthsCompleted };
   }
 
-  if (reference < anniversaryAfterYears(hire, 1)) {
+  const startOfReferenceYear = new Date(reference.getFullYear(), 0, 1);
+  const monthsCompletedAtYearStart = Math.max(0, completedLeaveMonths(hire, startOfReferenceYear));
+  const serviceYears = Math.floor(monthsCompletedAtYearStart / 12);
+
+  if (serviceYears < 1) {
     return {
       category: "under_1y",
       label: "1년 미만",
@@ -61,8 +59,6 @@ export function accruedAnnualLeave(hireDate: Date, asOf: Date = new Date()): Lea
     };
   }
 
-  let serviceYears = reference.getFullYear() - hire.getFullYear();
-  if (reference < anniversaryAfterYears(hire, serviceYears)) serviceYears -= 1;
   const extraDays = serviceYears >= 3 ? Math.floor((serviceYears - 1) / 2) : 0;
   const days = Math.min(25, 15 + extraDays);
   return {
