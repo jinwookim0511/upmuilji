@@ -3,25 +3,37 @@ import test from "node:test";
 
 import { accruedAnnualLeave, completedLeaveMonths, leaveDaysForType } from "../app/lib/leave.ts";
 
-test("counts the entry month only when at least 15 calendar days remain", () => {
-  assert.equal(completedLeaveMonths(new Date(2026, 0, 17), new Date(2026, 1, 1)), 1);
-  assert.equal(completedLeaveMonths(new Date(2026, 0, 18), new Date(2026, 1, 1)), 0);
-  assert.equal(completedLeaveMonths(new Date(2026, 0, 18), new Date(2026, 2, 1)), 1);
+test("counts the entry month when the hire date is on or before the 15th", () => {
+  assert.equal(completedLeaveMonths(new Date(2026, 1, 15), new Date(2026, 2, 1)), 1);
+  assert.equal(completedLeaveMonths(new Date(2026, 1, 16), new Date(2026, 2, 1)), 0);
+  assert.equal(completedLeaveMonths(new Date(2026, 1, 16), new Date(2026, 3, 1)), 1);
 });
 
-test("moves to annual entitlement only on the first anniversary", () => {
-  assert.equal(accruedAnnualLeave(new Date(2025, 8, 23), new Date(2026, 8, 22)).days, 11);
-  assert.deepEqual(accruedAnnualLeave(new Date(2025, 8, 23), new Date(2026, 8, 23)), {
+test("grants the first annual entitlement on January 1 for hires through October 1", () => {
+  assert.equal(accruedAnnualLeave(new Date(2025, 9, 1), new Date(2025, 11, 31)).days, 2);
+  assert.deepEqual(accruedAnnualLeave(new Date(2025, 9, 1), new Date(2026, 0, 1)), {
     category: "over_1y",
     label: "만 1년+",
     days: 15,
-    monthsCompleted: 11,
+    monthsCompleted: 3,
   });
 });
 
-test("adds biennial service leave and caps the result at 25 days", () => {
-  assert.equal(accruedAnnualLeave(new Date(2023, 8, 23), new Date(2026, 8, 23)).days, 16);
-  assert.equal(accruedAnnualLeave(new Date(2005, 8, 23), new Date(2026, 8, 23)).days, 25);
+test("keeps hires after October 1 on the under-one-year rule until the following January 1", () => {
+  assert.deepEqual(accruedAnnualLeave(new Date(2025, 9, 2), new Date(2026, 0, 1)), {
+    category: "under_1y",
+    label: "1년 미만",
+    days: 3,
+    monthsCompleted: 3,
+  });
+  assert.equal(accruedAnnualLeave(new Date(2025, 9, 2), new Date(2026, 11, 31)).days, 11);
+  assert.equal(accruedAnnualLeave(new Date(2025, 9, 2), new Date(2027, 0, 1)).days, 15);
+});
+
+test("updates service leave only on January 1 and caps the result at 25 days", () => {
+  assert.equal(accruedAnnualLeave(new Date(2023, 9, 1), new Date(2025, 11, 31)).days, 15);
+  assert.equal(accruedAnnualLeave(new Date(2023, 9, 1), new Date(2026, 0, 1)).days, 16);
+  assert.equal(accruedAnnualLeave(new Date(2005, 9, 1), new Date(2026, 0, 1)).days, 25);
 });
 
 test("converts only annual leave types into deducted days", () => {
